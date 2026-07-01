@@ -93,3 +93,21 @@
           (if (>= (leading-zero-bits (reverse h)) zero-bits)
             [n (vec h)]
             (recur (inc n) (inc i))))))))
+
+#?(:clj
+   (defn search-nonce-parallel
+     "JVM-only: `search-nonce` split across `n-threads` `future`s over contiguous nonce
+     sub-ranges, returning the globally-lowest winning nonce (identical to the single-thread
+     `search-nonce` result -- deterministic and testable, not first-to-return). Mining is
+     embarrassingly parallel across nonces, so this is the across-core axis (orthogonal to a
+     per-core fast compress). Whether it scales near-linearly or is capped by GC/allocation
+     contention from the per-nonce `long-array` + result-vector churn is the round-13 question."
+     [compress-fn mid tail-prefix-12 zero-bits start cnt n-threads]
+     (let [chunk (quot cnt n-threads)
+           futs  (mapv (fn [t]
+                         (let [s (+ start (* t chunk))
+                               c (if (= t (dec n-threads)) (- cnt (* t chunk)) chunk)]
+                           (future (search-nonce compress-fn mid tail-prefix-12 zero-bits s c))))
+                       (range n-threads))
+           hits  (keep deref futs)]
+       (when (seq hits) (apply min-key first hits)))))

@@ -90,6 +90,9 @@ completely different order than round-primitive rewrites -- see
 ;; mining nonce search — midstate reuse + a fast compress path (~4.4x over naive on the JVM);
 ;; scans nonces for a simplified leading-zero-bits target, returns [nonce hash] or nil:
 (midstate/search-nonce core/compress-primitive-inline mid tail-prefix-12 20 0 1000000)
+
+;; across-core parallel nonce search (JVM); ~4.6x on 10 cores (allocation/GC-bound, not linear):
+(midstate/search-nonce-parallel core/compress-primitive-inline mid tail-prefix-12 20 0 1000000 10)
 ```
 
 ```bash
@@ -182,10 +185,16 @@ V8) plus a platform-optimal opt-in fast path on each (`compress-primitive-inline
   one loop fills SHA-256's per-round dependency-chain pipeline bubbles (the portable, no-SIMD
   version of hardware multi-buffer). **Refuted: ~6% slower** — interleaving doubles the live state
   past the register file and spills to stack; the register-pressure cost exceeds the ILP gain.
-  This closes the last *portable* avenue.
+- **Round 12** (mining payoff): composed midstate + the fast compress into `search-nonce` —
+  **~4.4x** per-nonce over naive full-header hashing (1.59x midstate × 2.78x fast path, stacking
+  cleanly), bit-identical (finds the same winning nonce).
+- **Round 13** (across-core): `search-nonce-parallel` splits the nonce range over cores. It does
+  **not** scale linearly — ~4.6x on 10 cores (46% efficiency), plateauing because the per-nonce
+  allocation churn drives shared young-gen GC (+ Apple Silicon P/E-core mix). Notably this
+  *re-frames rounds 5-6*: reducing allocation was a dead end single-thread, but allocation governs
+  the parallel ceiling — motivating an allocation-free per-nonce path (round 14).
 
-Only genuinely-open frontier (larger, non-portable): a **hardware-SIMD** batch-of-N-messages
-hasher (JVM Vector API / WASM SIMD) for mining throughput — round 11 confirmed empirically that
-the win requires wide SIMD registers (which hold N lanes without spilling), not the interleaving
-idea itself. It changes the API shape (hash N nonces at once). Everything cheaper has been tried
-and measured.
+Open frontiers: an allocation-free per-nonce path (lift the parallel scaling ceiling, newly
+motivated by round 13); and a **hardware-SIMD** batch-of-N-messages hasher (JVM Vector API / WASM
+SIMD) — round 11 confirmed the win requires wide SIMD registers, not interleaving. Both are
+non-portable. Everything cheaper has been tried and measured.

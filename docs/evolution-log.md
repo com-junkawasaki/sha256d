@@ -662,3 +662,56 @@ per-operation-overhead fast path. Everything the tournament *rejected* (Ch/Maj f
 data structure, software multi-buffer) correctly stayed out. The only frontier beyond this remains
 hardware-SIMD multi-buffer (non-portable, N-nonces-at-once) — deferred, and now with the whole
 rest of the space mapped and measured beneath it.
+
+## 2026-07-02 (round 13) — parallelize the nonce search across cores: plateaus at ~4.6x on 10, not linear
+
+Every round so far was single-thread. Mining is embarrassingly parallel across nonces, so the
+across-core axis (orthogonal to the per-core fast compress, and to the still-deferred per-core
+SIMD) is the natural next lever. The non-obvious question: near-linear scaling, or capped by the
+per-nonce allocation churn hitting a shared allocator/GC?
+
+- `sha256d.midstate/search-nonce-parallel` (JVM-only): `search-nonce` split across N `future`s over
+  contiguous nonce sub-ranges, returning the globally-lowest winning nonce — identical to the
+  single-thread result (deterministic, testable, not first-to-return). Bit-identical to
+  `search-nonce` on the cross-strategy test. 21 tests / 7458 assertions.
+
+Scaling (fast compress `compress-primitive-inline`, 200k-nonce no-hit range so every thread fully
+scans; 10-core Apple Silicon; min-of-3):
+
+```
+ 1 thread   58239 nonce/s   1.00x   (= 17.2k ns/nonce, matches round 12's fast path)
+ 2 threads 114121 nonce/s   1.94x   97% efficiency
+ 4 threads 194555 nonce/s   3.31x   83%
+ 8 threads 258114 nonce/s   4.39x   55%
+10 threads 272374 nonce/s   4.63x   46%
+```
+
+**Findings:**
+
+37. **Parallel nonce search does NOT scale linearly — it plateaus at ~4.6x on 10 cores (46%
+    efficiency).** Near-linear to 2 cores (97%), degrades gradually through 4 (83%) and 8 (55%).
+    Peak ~272k nonce/s.
+38. **Two honest, not-fully-disentangled causes.** (a) Allocation/GC contention: the per-nonce path
+    allocates two `long-array`s + several vectors per hash; under 10-way parallelism the aggregate
+    allocation rate drives frequent young-gen GCs whose stop-the-world pauses stall *all* threads —
+    the classic ceiling on allocation-heavy parallel workloads, and the gradual (not cliff-shaped)
+    degradation fits this. (b) Apple Silicon heterogeneity: the 10 cores are a performance/efficiency
+    mix, so cores added past the P-core count contribute less. Disentangling them (GC logs, core
+    pinning, `-Xmn` tuning) is a follow-up; the *plateau* itself is solid and measured.
+39. **This retroactively re-frames rounds 5-6 — the most interesting finding of the round.** Reducing
+    schedule allocation (transient/mutable) was a measured DEAD END *single-thread* (rounds 5-6:
+    allocation was never the single-thread bottleneck — boxing/overhead was, per round 7). But round
+    13's cause (a) says allocation becomes a real bottleneck *under parallelism*, because the
+    allocator and GC are shared across cores. So an optimization that is noise on one thread can
+    govern the scaling ceiling on ten. Concrete round-14 hypothesis: an allocation-free per-nonce
+    path (thread-local *reused* `long-array` schedule + preallocated state, zero per-compress
+    allocation) should push efficiency back up — the payoff the transient/mutable rounds never had
+    single-thread may finally appear in the parallel regime.
+
+**Meta (rounds 1-13):** three composing throughput axes now measured: structural (midstate, 1.6x),
+per-operation-overhead (fast compress, 2.7x/core), and across-core (threads, ~4.6x here). The
+mining artifact (`search-nonce`/`search-nonce-parallel`) reaches ~272k nonce/s on this 10-core
+machine (~21x a naive single-thread reference at 13k nonce/s), all bit-identical. The remaining
+frontiers are now two, both about *allocation and lanes*: an allocation-free per-nonce path (round
+14, to lift the parallel ceiling — newly motivated) and hardware-SIMD multi-buffer (still the big
+non-portable one).

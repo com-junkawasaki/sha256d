@@ -56,7 +56,10 @@
         (is (>= (#'ms/leading-zero-bits (reverse (second ref-hit))) zero-bits)))
       #?(:clj
          (is (= ref-hit (ms/search-nonce core/compress-primitive-inline mid prefix12 zero-bits 0 5000))
-             "the JVM fast path finds the identical winning nonce as the reference")))))
+             "the JVM fast path finds the identical winning nonce as the reference"))
+      #?(:clj
+         (is (= ref-hit (ms/search-nonce-parallel core/compress mid prefix12 zero-bits 0 5000 10))
+             "the parallel search returns the identical globally-lowest winning nonce")))))
 
 (deftest synthetic-header-fixture-test
   (testing "synthetic (non-genesis) 80-byte header, sha256d cross-checked via Python hashlib"
