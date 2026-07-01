@@ -203,7 +203,15 @@ V8) plus a platform-optimal opt-in fast path on each (`compress-primitive-inline
   canonical genesis hash, and `search-nonce` recovers Satoshi's real genesis nonce (2083236893) at
   the genesis difficulty. First non-synthetic validation; grounds every optimization in the real chain.
 
-Sole remaining frontier: a **hardware-SIMD** batch-of-N-messages hasher (JVM Vector API / WASM
-SIMD) — round 11 confirmed the win requires wide SIMD registers, not interleaving; it raises
-per-core lane throughput, orthogonal to round 14's all-core frequency ceiling. Non-portable, and
-everything cheaper has been tried and measured (allocation never mattered anywhere — rounds 5-6, 13-14).
+- **Round 16** (probe the SIMD frontier): `jdk.incubator.vector` loads on JDK 24 with **4 lanes**
+  (ARM NEON) and correct ops — so a 4-way multi-buffer is possible in principle. But a performant
+  *Clojure* port is blocked: the Vector API calls **reflect** through `loop`/`recur` locals
+  (confirmed via `*warn-on-reflection*`) and the immutable-`IntVector` style allocates per op, so
+  the naive port is orders of magnitude too slow. A real SIMD hasher needs a **Java** hot loop
+  (leaving idiomatic Clojure entirely) plus unverified aarch64 C2 intrinsification.
+
+Sole remaining frontier, now scoped: a **hardware-SIMD** batch-of-N-messages hasher — viable in
+principle (4 NEON lanes here), but a dedicated Java effort outside this repo's portable-Clojure
+setting, and orthogonal to round 14's all-core frequency ceiling. Everything reachable in idiomatic
+Clojure has been tried and measured — kept (midstate, fast paths, threads) or honestly rejected
+(Ch/Maj formula, schedule data structure, software multi-buffer, allocation-free path).

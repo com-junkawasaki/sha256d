@@ -814,3 +814,45 @@ is hardware-SIMD multi-buffer (JVM Vector API / WASM SIMD) — large, non-portab
 throughput, orthogonal to everything measured. Every cheaper avenue has been tried, measured, and
 either kept (midstate, fast paths, threads) or honestly rejected (formula, schedule structure,
 software multi-buffer, allocation-free path).
+
+## 2026-07-02 (round 16) — probed the SIMD frontier: viable API, but needs a Java hot loop (not portable Clojure)
+
+Having deferred hardware-SIMD multi-buffer seven times, round 16 engaged it — with a feasibility
+probe first (scout before building ~100 lines of Vector API interop blind).
+
+**What the probe established:**
+
+46. **The JVM Vector API is available and correct here.** `jdk.incubator.vector` loads on JDK 24
+    (`--add-modules jdk.incubator.vector`); `IntVector.SPECIES_PREFERRED` = **4 lanes** (Apple
+    Silicon ARM NEON, `S_128_BIT`); broadcast / add / xor / shift / or produce correct lane values.
+    So the raw capability for a 4-way multi-buffer (theoretical ~4x per core) exists.
+47. **But a performant *Clojure* port is blocked — two compounding issues the probe surfaced:**
+    (a) **Reflection, confirmed.** Vector API calls (`.lanewise`/`.lane`/`broadcast`) cannot be
+    type-resolved through Clojure `loop`/`recur` locals — `*warn-on-reflection*` flags every one
+    ("call to method lanewise can't be resolved (target class is unknown)"). Every op reflects, so
+    even a tight 25M-iteration register-resident loop would not complete in 80s. (b) **Allocation.**
+    The immutable-`IntVector` style returns a fresh heap vector per op (~48 per schedule extension);
+    the naive `IntVector[64]` schedule is allocation-bound on top of the reflection cost. Removing
+    (a) needs pervasive `^IntVector` hinting on every intermediate — impractical through the 16-to-64-
+    vector schedule/state loops SHA-256 requires; the clean fix is to write the hot loop in Java.
+48. **And still unverified:** whether HotSpot C2 actually *intrinsifies* the Vector API on aarch64
+    (NEON) as well as it does x86 AVX — historically less mature. The reflection issue dominated
+    before this could even be measured.
+49. **Conclusion — the frontier is real but out of scope for this project's setting.** A SIMD
+    multi-buffer would be a dedicated **Java** hot-loop effort (leaving not just `.cljc` portability
+    but idiomatic Clojure entirely) plus aarch64 intrinsics validation. That is a qualitatively
+    bigger step than the per-platform fast paths were: those stayed within idiomatic Clojure/cljs
+    (`long-array`/`^long`; `Int32Array`/`| 0`). SIMD is the one avenue that requires dropping out of
+    the language the whole repo is written in. It stays open, now *scoped* (4 lanes, Java hot loop,
+    NEON intrinsics TBD) rather than hand-waved.
+
+**Meta (rounds 1-16):** the co-scientist search is complete for everything reachable in idiomatic
+portable Clojure. Sixteen rounds mapped the space: one real single-hash lever (per-operation
+overhead → ~2.7x/~3.6x fast paths), one structural mining win (midstate, 1.6x), one across-core
+axis (threads, ~4.6x, hardware-frequency-bounded), all bit-identical and grounded against the real
+genesis block — and a long list of measured, honestly-rejected dead ends (Ch/Maj formula, schedule
+data structure, software multi-buffer, allocation-free path). The last frontier (hardware SIMD)
+was probed and bounded: viable in principle, but a Java effort outside this repo's Clojure setting.
+No code artifact this round — the probe's finding was that the naive Clojure approach is the wrong
+tool, so nothing broken was committed. That is itself the measure-first discipline holding to the
+end: don't ship a slow/reflective SIMD port just to have "done SIMD."
