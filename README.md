@@ -206,9 +206,10 @@ V8) plus a platform-optimal opt-in fast path on each (`compress-primitive-inline
 - **Round 16** (probe the SIMD frontier): `jdk.incubator.vector` loads on JDK 24 with **4 lanes**
   (ARM NEON) and correct ops — so a 4-way multi-buffer is possible in principle. But a performant
   *Clojure* port is blocked: the Vector API calls **reflect** through `loop`/`recur` locals
-  (confirmed via `*warn-on-reflection*`) and the immutable-`IntVector` style allocates per op, so
-  the naive port is orders of magnitude too slow. A real SIMD hasher needs a **Java** hot loop
-  (leaving idiomatic Clojure entirely) plus unverified aarch64 C2 intrinsification.
+  (confirmed via `*warn-on-reflection*`) and the immutable-`IntVector` style allocates per op — the
+  naive port measured **~6,300× *slower* than scalar** (1.45 ms/msg vs 229 ns/msg). A real SIMD
+  hasher needs a **Java** hot loop (leaving idiomatic Clojure entirely) plus unverified aarch64 C2
+  intrinsification.
 
 Sole remaining frontier, now scoped: a **hardware-SIMD** batch-of-N-messages hasher — viable in
 principle (4 NEON lanes here), but a dedicated Java effort outside this repo's portable-Clojure

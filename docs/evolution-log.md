@@ -835,6 +835,10 @@ probe first (scout before building ~100 lines of Vector API interop blind).
     the naive `IntVector[64]` schedule is allocation-bound on top of the reflection cost. Removing
     (a) needs pervasive `^IntVector` hinting on every intermediate — impractical through the 16-to-64-
     vector schedule/state loops SHA-256 requires; the clean fix is to write the hot loop in Java.
+    **Measured (the probe finished when left to run longer):** the naive 4-lane array-of-`IntVector`
+    schedule extension clocked **~1,448,000 ns/msg vs 229 ns/msg scalar — ~6,300x SLOWER**, not 4x
+    faster. That single number is the whole finding: reflection + per-op heap allocation utterly
+    dominate, so the naive Clojure Vector API port is a non-starter, full stop.
 48. **And still unverified:** whether HotSpot C2 actually *intrinsifies* the Vector API on aarch64
     (NEON) as well as it does x86 AVX — historically less mature. The reflection issue dominated
     before this could even be measured.
