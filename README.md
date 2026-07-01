@@ -37,17 +37,19 @@ completely different order than round-primitive rewrites -- see
 - **`sha256d.core`** -- FIPS 180-4 SHA-256 + Bitcoin's SHA-256d (`sha256(sha256(x))`),
   over plain sequences of byte values (ints 0-255), no host byte-array type in the hot
   path. This is the correctness oracle everything else in the repo is checked against.
-  Two message-schedule strategies (`compress` = full 64-word precompute, `compress-rolling`
-  = 16-word just-in-time window), both bit-identical, injectable via `sha256-bytes-with`.
-- **`sha256d.ops`** -- the "gene pool", now `:ch (3) x :maj (3) x :schedule (2) = 18`
-  candidates. The Ch/Maj variants are `*-naive` (FIPS textbook), `*-alt` (the
+  Four message-schedule strategies, all bit-identical and injectable via `sha256-bytes-with`:
+  `compress` (full 64-word precompute), `compress-rolling` (16-word window),
+  `compress-transient` (transient-built precompute), and JVM-only `compress-mutable`
+  (in-place `long-array`).
+- **`sha256d.ops`** -- the "gene pool", now `:ch (3) x :maj (3) x :schedule (4 on the JVM,
+  3 on cljs) = 36 candidates (27 on cljs)`. The Ch/Maj variants are `*-naive` (FIPS textbook), `*-alt` (the
   OpenSSL/Bitcoin Core one-fewer-gate formulation), and `*-or` (the same pairwise terms
   as `*-naive`, OR'd instead of XOR'd -- valid because those terms are pairwise-disjoint
   / never-exactly-two-1), each proven algebraically equivalent to the FIPS textbook form
   in a doc-comment and re-checked exhaustively (all single-bit truth-table rows +
   randomized 32-bit words) in `test/sha256d/ops_test.cljc`. The `:schedule` gene is an
-  implementation-strategy axis rather than a per-bit formula (`compress` vs
-  `compress-rolling`).
+  implementation-strategy axis rather than a per-bit formula (`:precompute`, `:rolling`,
+  `:precompute-transient`, and JVM-only `:mutable`).
 - **`sha256d.midstate`** -- Bitcoin block-header mining's classic optimization: cache
   the compression state after a header's constant first 64 bytes so each nonce attempt
   only re-runs the second block's 64 rounds, not the whole 80-byte header.
@@ -118,18 +120,26 @@ honest across rounds:
   idiomatic persistent-vector Clojure (window-sliding via `conj`/`subvec` allocates).
 - **Round 5** (tested round 4's causal claim): added `:precompute-transient`
   (`compress-transient`, schedule built in a transient vector) to test whether *cutting
-  allocation* is the lever. It isn't — transient precompute is within noise of (sometimes
-  worse than) plain precompute and never wins; plain `:precompute` takes every champion
-  slot. So the reference schedule build is already near-optimal in portable Clojure;
-  rolling's penalty is its specific `subvec`+`conj`+interleaving, not "allocation" broadly.
+  allocation* is the lever. It isn't — transient precompute is within noise of plain
+  precompute and never wins.
+- **Round 6** (the decisive mutable-buffer test): added JVM-only `:mutable`
+  (`compress-mutable`, a C-style in-place `long-array` schedule with **zero per-step
+  allocation**). It was supposed to confirm "you must leave persistent structures to win" —
+  instead it **refuted** it: `:mutable` and `:precompute` are statistically tied (they
+  alternate the championship, all within ~0.5%). So the schedule container was never the
+  bottleneck. The real cost is the **boxed arithmetic in the round function** (varargs
+  `add32`, boxed bit-ops/`ch`/`maj`, vector `(K t)`/`(w t)` lookups) — shared by every
+  schedule strategy, which is why they all tie or lose. `:rolling` is dead-last for the 6th
+  round running (it adds allocation + interleaving without touching the boxing).
 
-**Net (rounds 1-5):** zero portable speedups found — every Ch/Maj formula is within noise,
-both schedule alternatives are ties-or-losses. The honest result is that *the reference is
-already at the portable-Clojure efficient frontier for a single-stream hash*; the only real
-levers are structural (`sha256d.midstate`, already in the repo) or require leaving `.cljc`
-(mutable buffers, SIMD/lane parallelism). The harness earned its keep by **rejecting** three
-plausible "optimizations" that don't survive a convergence-sound tournament.
+**Net (rounds 1-6):** the honest, hard-won result is that neither the Ch/Maj *formula* nor
+the schedule *data structure* (persistent, transient, or zero-allocation mutable) moves the
+needle — the bottleneck is boxed 32-bit arithmetic in the round loop, a lever no round has
+yet pulled. The harness earned its keep by **rejecting** four plausible "optimizations"
+(naive-elimination, rolling, transient, mutable-buffer) that don't survive a convergence-sound
+tournament, and by triangulating the *actual* bottleneck by elimination.
 
-Open follow-ups: benchmarking under node (V8 allocation differs — ranks may change); a
-deliberately non-`.cljc` mutable-`int-array` JVM schedule; a batch/lane-parallel
-(multi-message) gene — the one axis that could plausibly beat the reference, untried.
+Open follow-ups: **round 7 — a primitive/unboxed round function** (`^long` hints,
+`unchecked-add`, fixed-arity add, primitive `ch`/`maj`; `.cljc`-valid since cljs ignores
+hints) — the classic 2-5x JVM numeric win and the first thing that should actually move
+ns/hash; benchmarking under node; a batch/lane-parallel (multi-message) gene.

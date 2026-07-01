@@ -157,6 +157,36 @@
   ([state block ch-fn maj-fn]
    (run-rounds state (extend-schedule-transient (block->words block)) ch-fn maj-fn)))
 
+#?(:clj
+   (defn compress-mutable
+     "JVM-ONLY, deliberately NON-portable (mutable `long-array`, so it is excluded from the
+     ClojureScript gene pool). The C-style in-place message schedule: one 64-slot
+     `long-array` filled with `aset` and read with `aget`, i.e. zero per-step persistent
+     allocation. Round 6 exists to decisively test rounds 4-5's standing claim that the
+     only way to beat the persistent-vector precompute is to leave persistent structures.
+     `long-array` (not `int-array`) because SHA-256 words are unsigned 32-bit (0..2^32-1),
+     which do not fit a Java `int`. Held to the same bit-identical correctness gate on the
+     JVM (compress-mutable-equivalence-test)."
+     ([state block] (compress-mutable state block ch maj))
+     ([[h0 h1 h2 h3 h4 h5 h6 h7] block ch-fn maj-fn]
+      (let [^longs w (long-array 64)
+            bw (block->words block)]
+        (dotimes [i 16] (aset w i (long (nth bw i))))
+        (loop [t 16]
+          (when (< t 64)
+            (aset w t (long (add32 (small-sigma1 (aget w (- t 2)))
+                                   (aget w (- t 7))
+                                   (small-sigma0 (aget w (- t 15)))
+                                   (aget w (- t 16)))))
+            (recur (inc t))))
+        (loop [a h0 b h1 c h2 d h3 e h4 f h5 g h6 h h7 t 0]
+          (if (= t 64)
+            [(add32 h0 a) (add32 h1 b) (add32 h2 c) (add32 h3 d)
+             (add32 h4 e) (add32 h5 f) (add32 h6 g) (add32 h7 h)]
+            (let [t1 (add32 h (big-sigma1 e) (ch-fn e f g) (K t) (aget w t))
+                  t2 (add32 (big-sigma0 a) (maj-fn a b c))]
+              (recur (add32 t1 t2) a b c (add32 d t1) e f g (inc t)))))))))
+
 (defn compress-rolling
   "Same result as `compress`, but computes the message schedule in a 16-word rolling
   window just-in-time inside the round loop instead of materializing the full 64-word

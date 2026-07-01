@@ -56,3 +56,13 @@
         (is (= "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
                (core/bytes->hex (core/sha256-bytes-with compress-fn
                                                         (core/str->bytes "abc") core/ch core/maj))))))))
+
+#?(:clj
+   (deftest compress-mutable-equivalence-test
+     (testing "the JVM-only mutable long-array schedule is bit-identical to the reference
+               across every padding boundary and many blocks"
+       (doseq [n (range 0 260)]
+         (let [msg (vec (map #(mod (* 37 (inc %)) 256) (range n)))]
+           (is (= (core/sha256-bytes msg)
+                  (core/sha256-bytes-with core/compress-mutable msg core/ch core/maj))
+               (str "n=" n)))))))

@@ -274,3 +274,60 @@ might rank differently there); a deliberately non-`.cljc` JVM-only mutable-`int-
 schedule to confirm the "leaving persistent structures is the only way" claim; a
 batch/lane-parallel (multi-message) gene, the one axis that could plausibly beat the
 reference and hasn't been tried.
+
+## 2026-07-01 (round 6) — the mutable-buffer test that was supposed to confirm the claim; it refuted it
+
+Round 5 teed this up: build the C-style in-place mutable schedule and confirm rounds 4-5's
+standing claim that *the only way to beat the persistent-vector precompute is to leave
+persistent structures*.
+
+- `sha256d.core/compress-mutable` (JVM-only, `#?(:clj ...)`): one 64-slot `long-array`
+  (not `int-array` — SHA-256 words are unsigned 32-bit and don't fit a Java `int`), filled
+  with `aset`, read with `aget` — **zero per-step allocation**, exactly the C approach.
+  Excluded from the ClojureScript gene pool (portability preserved: cljs proof still 6/6).
+  Proven bit-identical on the JVM across 260 sizes (`compress-mutable-equivalence-test`).
+  JVM pool is now `:ch(3) x :maj(3) x :schedule(4) = 36`; 18 tests / 6007 assertions.
+
+Three runs (top few + transient/rolling tails):
+
+```
+run 1: champ {alt,alt,:mutable} 45914 (elo 1270); {alt,naive,:mutable} 45848 (1260);
+       {alt,alt,:precompute} 45836 (1061); ...; transient 46922 (967); rolling 48726 (919)
+run 2: champ {alt,alt,:precompute} 45810 (elo 1290); {alt,naive,:mutable} 45983 (1288);
+       {alt,alt,:mutable} 46064 (1226); ...; transient 46645 (1065); rolling 48765 (761)
+run 3: champ {alt,alt,:precompute} 46295 (elo 1310); {alt,alt,:mutable} 46488 (1257);
+       ...; transient 46900 (1015); rolling 49332 (928)
+```
+
+**Findings:**
+
+15. **The claim is REFUTED: even a zero-allocation mutable `long-array` schedule does NOT
+    beat the persistent-vector precompute.** `:mutable` and `:precompute` are statistically
+    tied — they alternate the championship (mutable wins run 1, precompute wins runs 2-3),
+    and all their top ns/hash values sit within ~0.5% (45.8-46.5k). So "leaving persistent
+    structures" was NOT the missing lever; the schedule container and its allocation were
+    never the bottleneck. (`:rolling` is dead-last for the *sixth* round running; `:precompute-
+    transient` again mid-pack.)
+16. **So the real bottleneck is the boxed arithmetic in the round function**, which every
+    schedule strategy shares: `add32`'s `(apply + xs)` varargs boxing, bit-ops on boxed
+    `Long`s, boxed `ch`/`maj` return values, and the `(K t)`/`(w t)` vector lookups — ~128
+    rounds of it per 2-block hash, dwarfing the ~48-step schedule build that the schedule
+    genes vary. That's why *every* schedule strategy ties or loses: they all pay the same
+    dominant boxed-round cost. It also explains rolling's persistent last place cleanly —
+    rolling doesn't reduce that cost, and it *adds* per-step `subvec`/`conj` allocation while
+    interleaving the schedule into the round loop (defeating a tight, separable, JIT-friendly
+    round pass). Mutable and precompute both keep the schedule build separate and the round
+    loop tight, so they tie.
+17. **This overturns the round-5 "meta" conclusion's framing.** Rounds 4-5 concluded the
+    reference was "at the efficient frontier" and further wins needed non-`.cljc` mutable
+    buffers. Round 6 shows the mutable buffer *doesn't* help — so the frontier isn't the data
+    structure at all; it's the **unboxed-vs-boxed arithmetic** of the round function, a lever
+    none of rounds 1-6 has touched (all variants reuse the same boxed `add32`/bit-ops).
+
+**Clear next experiment (round 7):** a primitive/unboxed round function — `^long` type hints,
+`unchecked-add`, a fixed-arity (non-varargs) add, primitive `ch`/`maj`, and avoiding the
+boxed vector lookups. On the JVM this is the classic 2-5x Clojure numeric win and is the
+first thing that should actually move ns/hash (and might finally make the Ch/Maj formula
+differences visible above the noise, since boxing currently swamps them). `^long` hints are
+valid `.cljc` (cljs ignores them), so a portable primitive round function is plausible —
+that would be the first genuine, portable positive result if it lands.
