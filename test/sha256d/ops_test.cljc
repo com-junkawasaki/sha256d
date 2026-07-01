@@ -18,22 +18,22 @@
 (deftest ch-equivalence-test
   (testing "truth table (all 8 single-bit combinations)"
     (doseq [[x y z] bit-rows]
-      (is (= (core/ch x y z) (ops/ch-naive x y z) (ops/ch-alt x y z))
+      (is (= (core/ch x y z) (ops/ch-naive x y z) (ops/ch-alt x y z) (ops/ch-or x y z))
           (str "x=" x " y=" y " z=" z))))
   (testing "randomized 32-bit words"
     (dotimes [_ 2000]
       (let [x (rand32) y (rand32) z (rand32)]
-        (is (= (core/ch x y z) (ops/ch-alt x y z)))))))
+        (is (= (core/ch x y z) (ops/ch-alt x y z) (ops/ch-or x y z)))))))
 
 (deftest maj-equivalence-test
   (testing "truth table (all 8 single-bit combinations)"
     (doseq [[x y z] bit-rows]
-      (is (= (core/maj x y z) (ops/maj-naive x y z) (ops/maj-alt x y z))
+      (is (= (core/maj x y z) (ops/maj-naive x y z) (ops/maj-alt x y z) (ops/maj-or x y z))
           (str "x=" x " y=" y " z=" z))))
   (testing "randomized 32-bit words"
     (dotimes [_ 2000]
       (let [x (rand32) y (rand32) z (rand32)]
-        (is (= (core/maj x y z) (ops/maj-alt x y z)))))))
+        (is (= (core/maj x y z) (ops/maj-alt x y z) (ops/maj-or x y z)))))))
 
 (deftest gene-pool-end-to-end-test
   (testing "swapping any gene-pool variant into the full digest pipeline changes nothing"

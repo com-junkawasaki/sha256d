@@ -4,11 +4,15 @@
             [sha256d.ops :as ops]
             [sha256d.evolve :as evolve]))
 
+(defn expected-candidate-count [pool]
+  (reduce * (map (comp count val) pool)))
+
 (deftest generate-candidates-test
-  (testing "every combination of the 2x2 default gene pool"
-    (is (= 4 (count (evolve/generate-candidates))))
-    (is (= #{{:ch :naive :maj :naive} {:ch :naive :maj :alt}
-             {:ch :alt :maj :naive} {:ch :alt :maj :alt}}
+  (testing "every combination of the default gene pool, size derived from the pool itself
+            so this test doesn't need editing every time a gene/variant is added"
+    (is (= (expected-candidate-count ops/gene-pool) (count (evolve/generate-candidates))))
+    (is (= (set (for [ch-k (keys (:ch ops/gene-pool)) maj-k (keys (:maj ops/gene-pool))]
+                  {:ch ch-k :maj maj-k}))
            (set (evolve/generate-candidates))))))
 
 (deftest reflect-test
@@ -23,7 +27,7 @@
   (testing "rank produces a full, Elo-sorted leaderboard over the surviving candidates"
     (let [payload (core/str->bytes "rank-test payload")
           ranked (evolve/rank ops/gene-pool (evolve/generate-candidates) payload {:iters 10 :reps 3})]
-      (is (= 4 (count ranked)))
+      (is (= (expected-candidate-count ops/gene-pool) (count ranked)))
       (is (apply >= (map :elo ranked)))
       (is (every? #(<= 0 (:ns-per-hash %)) ranked))))
   (testing "cluster-by-proximity partitions the ranked list without dropping anyone"

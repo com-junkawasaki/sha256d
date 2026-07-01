@@ -25,6 +25,14 @@
   [x y z]
   (bit-xor z (bit-and x (bit-xor y z))))
 
+(defn ch-or
+  "(x&y) | (~x&z) -- same gate count as ch-naive, OR instead of the outer XOR.
+  Equivalence: on any single bit, x&y requires x=1 and ~x&z requires x=0, so the two
+  terms can never both be 1 for the same bit (they're disjoint) -- OR and XOR of two
+  disjoint terms are identical (0|0=0^0, 1|0=1^0, 0|1=0^1; 1|1 never occurs)."
+  [x y z]
+  (bit-or (bit-and x y) (bit-and (bit-not x) z)))
+
 ;; --- Maj(x,y,z) = (x&y) ^ (x&z) ^ (y&z) ---------------------------------------------
 
 (defn maj-naive
@@ -44,7 +52,15 @@
   [x y z]
   (bit-or (bit-and x y) (bit-and z (bit-or x y))))
 
+(defn maj-or
+  "(x&y) | (x&z) | (y&z) -- maj-naive's exact pairwise terms, ORed instead of XORed.
+  Same disjointness argument as maj-alt's doc-comment (the three pairwise terms are
+  always jointly 0, exactly-one-1, or all-1, never exactly-two-1), so OR and XOR of
+  them agree in every case."
+  [x y z]
+  (bit-or (bit-and x y) (bit-and x z) (bit-and y z)))
+
 (def gene-pool
   "Named variants per primitive, keyed for sha256d.evolve's candidate generation."
-  {:ch  {:naive ch-naive :alt ch-alt}
-   :maj {:naive maj-naive :alt maj-alt}})
+  {:ch  {:naive ch-naive :alt ch-alt :or ch-or}
+   :maj {:naive maj-naive :alt maj-alt :or maj-or}})

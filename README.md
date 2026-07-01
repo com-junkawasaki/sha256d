@@ -33,11 +33,13 @@ completely different order than round-primitive rewrites -- see
 - **`sha256d.core`** -- FIPS 180-4 SHA-256 + Bitcoin's SHA-256d (`sha256(sha256(x))`),
   over plain sequences of byte values (ints 0-255), no host byte-array type in the hot
   path. This is the correctness oracle everything else in the repo is checked against.
-- **`sha256d.ops`** -- the "gene pool": `ch-alt`/`maj-alt`, alternative Ch/Maj
-  formulations used by real-world implementations (OpenSSL, Bitcoin Core), each proven
-  algebraically equivalent to the FIPS textbook form in a doc-comment and re-checked
-  exhaustively (all single-bit truth-table rows + randomized 32-bit words) in
-  `test/sha256d/ops_test.cljc`.
+- **`sha256d.ops`** -- the "gene pool", currently 3 variants each for Ch and Maj
+  (9 candidates): `*-naive` (FIPS textbook), `*-alt` (the OpenSSL/Bitcoin Core
+  one-fewer-gate formulation), and `*-or` (the same pairwise terms as `*-naive`, OR'd
+  instead of XOR'd -- valid because those terms are pairwise-disjoint/never-exactly-
+  two-1). Each proven algebraically equivalent to the FIPS textbook form in a
+  doc-comment and re-checked exhaustively (all single-bit truth-table rows + randomized
+  32-bit words) in `test/sha256d/ops_test.cljc`.
 - **`sha256d.midstate`** -- Bitcoin block-header mining's classic optimization: cache
   the compression state after a header's constant first 64 bytes so each nonce attempt
   only re-runs the second block's 64 rounds, not the whole 80-byte header.
@@ -89,9 +91,12 @@ on a `long` is 64-bit-aware and masked the bug).
 
 ## Status / follow-ups
 
-See `docs/evolution-log.md` for the tournament's actual first-run findings (no stable
-champion at the current gene-pool size -- the Ch/Maj formula choice is within benchmark
-noise for this payload; convergence-driven diversity loss in `evolve-round` across
-generations). Growing the gene pool (loop-unrolling degree, schedule-buffer reuse,
-batch/lane-parallel hashing) and running the tournament under node (not just JVM) are
-open follow-ups, not done in this initial pass.
+See `docs/evolution-log.md` for what the tournament has actually found so far: round 1
+(2x2 gene pool) found no stable champion -- Ch/Maj formula choice was within benchmark
+noise. Round 2 grew the pool to 3x3 (added `ch-or`/`maj-or`) and found a clearer signal:
+the `*-naive` forms are consistently eliminated by generation 3 across repeated runs
+(real evidence the one-fewer-gate `alt`/`or` forms measurably help), while `alt` vs `or`
+remain a toss-up. The generation-over-generation diversity loss in `evolve-round`
+(convergence to 2 candidates regardless of pool size) is still open. Growing the gene
+pool further (loop-unrolling degree, schedule-buffer reuse, batch/lane-parallel
+hashing) and running the tournament under node (not just JVM) remain open follow-ups.
