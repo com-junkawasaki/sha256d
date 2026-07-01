@@ -63,7 +63,7 @@
      (testing "the JVM-only fast paths (mutable long-array schedule; unboxed round loop)
                are bit-identical to the reference across every padding boundary and many
                blocks, and via all ch/maj gene variants for the unboxed path"
-       (doseq [compress-fn [core/compress-mutable core/compress-primitive]
+       (doseq [compress-fn [core/compress-mutable core/compress-primitive core/compress-primitive-inline]
                n (range 0 260)]
          (let [msg (vec (map #(mod (* 37 (inc %)) 256) (range n)))]
            (is (= (core/sha256-bytes msg)

@@ -507,3 +507,55 @@ purely by taking the measured mechanism seriously each time.
 **Still open (non-portable / bigger):** SIMD batch-of-N-messages hashing (JVM Vector API / WASM
 SIMD) for the mining throughput case — the only remaining path that could beat *these* fast
 paths; and fully inlining ch/maj (finding 19 says small). Both are larger, non-portable efforts.
+
+## 2026-07-02 (round 10) — inlined ch/maj: finding 19 was wrong on the JVM, right on V8
+
+Finding 19 (round 7) *predicted* that inlining ch/maj — removing the last boxed-call island in
+the fast paths — would be small. Round 10 measured it on both runtimes instead of guessing.
+
+- `sha256d.core/compress-primitive-inline` (JVM) and `compress-v8-inline` (cljs): the round-7/9
+  fast paths with the reference ch/maj INLINED as primitive/int32 bit-expressions
+  (`(e&f)^(~e&g)` and `(a&b)^(a&c)^(b&c)`) instead of injected fn calls. They hardcode the
+  reference ch/maj (Ch/Maj is noise, so nothing is lost) and so don't compose with the :ch/:maj
+  genes — kept out of the gene pool, used only for head-to-head benchmarks. Bit-identical across
+  260 sizes (JVM) / 130 sizes (cljs); no reflection warnings on the JVM. 18 tests / 6554
+  assertions; cljs-verify 7/7.
+
+High-iteration alternating A/B (4000 iters x 15 reps, warmed):
+
+```
+JVM:  compress-primitive-inline / compress-primitive  = 0.867, 0.868, 0.868, 0.872   (~13% faster)
+V8:   compress-v8-inline        / compress-v8         = 0.979, 0.976, 0.975, 0.975   (~2.4% faster)
+```
+
+**Findings:**
+
+28. **Finding 19 was WRONG on the JVM (~13%) and RIGHT on V8 (~2.4%) — a platform split with a
+    clear mechanism.** On the JVM the injected `ch-fn`/`maj-fn` are boxed Clojure `IFn` calls
+    (Object args + return) reached through a higher-order-function seam the JIT can't inline
+    through, so each call boxes 3 args + a result — ~13% of the round, real and consistent
+    (ratios 0.867-0.872, extremely tight). On V8 the injected ch/maj are small monomorphic JS
+    functions that TurboFan already inlines, over values that are already unboxed SMIs, so
+    removing the call syntactically saves almost nothing (~2.4%). Same source change, 5x
+    different payoff, because of whether the runtime can see through the injection seam.
+29. **New best JVM fast path.** `compress-primitive-inline` is ~13% over `compress-primitive`,
+    i.e. roughly ~2.6-2.8x over the portable reference (vs ~2.3x). On V8 `compress-v8-inline` is
+    a marginal ~2.4% over `compress-v8` (~3.6x over reference) — take-it-or-leave-it. Since
+    Ch/Maj is noise, the inline variants lose nothing by hardcoding the reference formula, so
+    they are the recommended opt-in fast paths.
+30. **Methodological note:** the direct high-iter A/B (JVM primitive ~19.5k, inline ~16.9k; V8
+    v8 ~34.7k, inline ~33.9k) reads a bit faster than the tournament figures (which use the
+    default 200x7 bench with more warmup noise). The tournament is for *ranking* many candidates;
+    a focused warmed A/B is the right tool for resolving a single ~few-percent delta — using the
+    tournament for that would have hidden the V8 result inside its proximity tolerance.
+
+**Meta (rounds 1-10):** the optimization space is now exhausted for a single-stream hash on both
+runtimes. Final picture: `compress` (portable reference, identical *relative* verdicts on JVM &
+V8), `compress-primitive-inline` (JVM, ~2.7x), `compress-v8-inline` (V8, ~3.6x), all bit-
+identical; `midstate` for mining. Ch/Maj formula never mattered (4 rounds of noise); schedule
+data structure never mattered (rolling hurt, transient/mutable tied); the entire win was
+removing per-operation runtime overhead — boxing/IFn-calls on the JVM, and (much less) on V8.
+
+**Only genuinely-open frontier:** SIMD batch-of-N-messages hashing (JVM Vector API / WASM SIMD)
+for mining throughput — a materially larger, non-portable effort that changes the API shape
+(hash N nonces at once). Everything cheaper than that has now been tried and measured.

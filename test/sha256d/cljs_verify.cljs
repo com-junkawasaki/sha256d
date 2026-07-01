@@ -35,7 +35,9 @@
                             ;; also exercises transient-vector nth reads under cljs
                             (= ref (core/sha256-bytes-with core/compress-transient msg core/ch core/maj))
                             ;; the round-9 Int32Array V8 fast path
-                            (= ref (core/sha256-bytes-with core/compress-v8 msg core/ch core/maj)))))
+                            (= ref (core/sha256-bytes-with core/compress-v8 msg core/ch core/maj))
+                            ;; the round-10 V8 fast path with ch/maj inlined
+                            (= ref (core/sha256-bytes-with core/compress-v8-inline msg core/ch core/maj)))))
                    (range 0 130)))
     (check "compress-v8 composes correctly with every ch/maj gene combination"
            (let [msg (core/str->bytes "compose-v8-with-ch-maj-genes")

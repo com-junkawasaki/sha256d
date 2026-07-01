@@ -234,6 +234,44 @@
               (recur (bit-and (unchecked-add t1 t2) 0xffffffff) a b c
                      (bit-and (unchecked-add d t1) 0xffffffff) e f g (inc t)))))))))
 
+#?(:clj
+   (defn compress-primitive-inline
+     "JVM-only (round 10): `compress-primitive` with the reference ch/maj INLINED as primitive
+     bit-expressions instead of injected fn calls -- removing the last boxing island (ch/maj
+     were the only boxed calls left in the unboxed round loop). Tests round 7's finding 19:
+     does that residual call/box overhead matter? Because it hardcodes the reference ch/maj, it
+     does NOT compose with the :ch/:maj genes (the 4-arg arity ignores them); kept out of the
+     gene pool, used only for the head-to-head benchmark. Bit-identical gate on the JVM."
+     ([state block] (compress-primitive-inline state block nil nil))
+     ([[h0 h1 h2 h3 h4 h5 h6 h7] block _ch-fn _maj-fn]
+      (let [^longs w (long-array 64)
+            ^longs karr k-array
+            bw (block->words block)]
+        (dotimes [i 16] (aset w i (long (nth bw i))))
+        (loop [t 16]
+          (when (< t 64)
+            (aset w t (long (add32 (small-sigma1 (aget w (- t 2)))
+                                   (aget w (- t 7))
+                                   (small-sigma0 (aget w (- t 15)))
+                                   (aget w (- t 16)))))
+            (recur (inc t))))
+        (loop [a (long h0) b (long h1) c (long h2) d (long h3)
+               e (long h4) f (long h5) g (long h6) h (long h7) t 0]
+          (if (= t 64)
+            [(bit-and (unchecked-add (long h0) a) 0xffffffff) (bit-and (unchecked-add (long h1) b) 0xffffffff)
+             (bit-and (unchecked-add (long h2) c) 0xffffffff) (bit-and (unchecked-add (long h3) d) 0xffffffff)
+             (bit-and (unchecked-add (long h4) e) 0xffffffff) (bit-and (unchecked-add (long h5) f) 0xffffffff)
+             (bit-and (unchecked-add (long h6) g) 0xffffffff) (bit-and (unchecked-add (long h7) h) 0xffffffff)]
+            (let [chv (bit-xor (bit-and e f) (bit-and (bit-not e) g))
+                  mjv (bit-xor (bit-and a b) (bit-and a c) (bit-and b c))
+                  t1  (bit-and (unchecked-add (unchecked-add (unchecked-add h (bsig1* e))
+                                                             (unchecked-add chv (aget karr t)))
+                                              (aget w t))
+                               0xffffffff)
+                  t2  (bit-and (unchecked-add (bsig0* a) mjv) 0xffffffff)]
+              (recur (bit-and (unchecked-add t1 t2) 0xffffffff) a b c
+                     (bit-and (unchecked-add d t1) 0xffffffff) e f g (inc t)))))))))
+
 ;; CLJS-only fast path for V8 (round 9) — the symmetric counterpart to `compress-primitive`.
 ;; On V8 there's no boxed-Long problem, but the reference pays for persistent-vector schedule
 ;; /K lookups and the varargs `add32` (`(apply + xs)` allocates an arg-seq every call). This
@@ -274,6 +312,35 @@
              (bit-or 0 (+ h4 e)) (bit-or 0 (+ h5 f)) (bit-or 0 (+ h6 g)) (bit-or 0 (+ h7 h))]
             (let [t1 (bit-or 0 (+ (+ (+ h (v8-bsig1 e)) (+ (ch-fn e f g) (aget k-int32 t))) (aget w t)))
                   t2 (bit-or 0 (+ (v8-bsig0 a) (maj-fn a b c)))]
+              (recur (bit-or 0 (+ t1 t2)) a b c (bit-or 0 (+ d t1)) e f g (inc t)))))))))
+
+#?(:cljs
+   (defn compress-v8-inline
+     "CLJS-only (round 10): `compress-v8` with the reference ch/maj INLINED as int32 bit-
+     expressions instead of injected fn calls -- the cljs counterpart to
+     `compress-primitive-inline`, removing the last JS-function-call island. Hardcodes the
+     reference ch/maj (does not compose with the :ch/:maj genes -- fine, since Ch/Maj is noise),
+     so it's kept out of the gene pool and used only for the head-to-head benchmark. Bit-
+     identical gate in cljs-verify."
+     ([state block] (compress-v8-inline state block nil nil))
+     ([[h0 h1 h2 h3 h4 h5 h6 h7] block _ch-fn _maj-fn]
+      (let [w  (js/Int32Array. 64)
+            bw (block->words block)]
+        (dotimes [i 16] (aset w i (nth bw i)))
+        (loop [t 16]
+          (when (< t 64)
+            (let [w2  (aget w (- t 2))  w7  (aget w (- t 7))
+                  w15 (aget w (- t 15)) w16 (aget w (- t 16))]
+              (aset w t (bit-or 0 (+ (+ (v8-ssig1 w2) w7) (+ (v8-ssig0 w15) w16)))))
+            (recur (inc t))))
+        (loop [a h0 b h1 c h2 d h3 e h4 f h5 g h6 h h7 t 0]
+          (if (= t 64)
+            [(bit-or 0 (+ h0 a)) (bit-or 0 (+ h1 b)) (bit-or 0 (+ h2 c)) (bit-or 0 (+ h3 d))
+             (bit-or 0 (+ h4 e)) (bit-or 0 (+ h5 f)) (bit-or 0 (+ h6 g)) (bit-or 0 (+ h7 h))]
+            (let [chv (bit-xor (bit-and e f) (bit-and (bit-not e) g))
+                  mjv (bit-xor (bit-and a b) (bit-and a c) (bit-and b c))
+                  t1  (bit-or 0 (+ (+ (+ h (v8-bsig1 e)) (+ chv (aget k-int32 t))) (aget w t)))
+                  t2  (bit-or 0 (+ (v8-bsig0 a) mjv))]
               (recur (bit-or 0 (+ t1 t2)) a b c (bit-or 0 (+ d t1)) e f g (inc t)))))))))
 
 (defn compress-rolling
