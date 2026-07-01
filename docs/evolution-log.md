@@ -447,3 +447,63 @@ that could beat the reference, for the mining use case specifically); and — if
 V8-specific fast path (e.g. `Int32Array` with explicit `>>> 0` unsigned coercion), the cljs
 analog of the JVM `long-array` path, which round 8's numbers suggest is where V8 headroom
 would be, if anywhere.
+
+## 2026-07-02 (round 9) — built the V8 fast path round 8 predicted: ~3.5x, the first cljs win
+
+Round 8 called the shot: V8's headroom is a typed-array fast path, the cljs analog of round 7's
+JVM `long-array` unboxing. Round 9 built it and it landed.
+
+- `sha256d.core/compress-v8` (cljs-only, `#?(:cljs ...)`): `Int32Array` schedule + K, fixed-arity
+  int32 `+` with a `| 0` (`bit-or 0`) truncation, and no persistent-vector lookups or varargs
+  `add32`. Values are signed int32 throughout — already how the reference behaves on cljs
+  (`bit-and x 0xffffffff` == `x & -1` == ToInt32) and bit-correct because `words->bytes` extracts
+  with `>>>`. Bit-identical to the reference across 130 sizes AND all 9 ch/maj combinations
+  (cljs-verify now 7/7). Still calls injected ch/maj, so it composes with the genes. Excluded
+  from the JVM pool; cljs pool is now `:ch(3) x :maj(3) x :schedule(4) = 36` (precompute/rolling/
+  transient/v8). JVM suite unchanged (18 tests / 6294 assertions).
+
+One node/V8 run, full leaderboard (all in the same run for a clean side-by-side):
+
+```
+{or,alt,:v8}                  37811 ns/hash  elo 1348
+{or,naive,:v8}                37755         1332
+{or,or,:v8}                   38357         1225
+{alt,alt,:v8}                 38445         1056
+{naive,alt,:v8}               38830         1017
+{or,alt,:precompute}         135211          986
+{or,alt,:precompute-transient} 142122        958
+{or,alt,:rolling}            145442          924   (last)
+```
+
+**Findings:**
+
+24. **First cljs positive result: the V8 fast path is ~3.5x.** `:v8` candidates run at ~37.8-38.8k
+    ns/hash vs the reference `:precompute` at ~135k — 135211/37811 ≈ **3.58x** — consistent across
+    3+ runs with a clean, huge Elo gap. Symmetric to round 7's JVM `compress-primitive` (~2.3x):
+    same underlying insight, each via its platform's native numeric mechanism.
+25. **The V8 win (~3.5x) is even bigger than the JVM win (~2.3x).** On V8 the reference's varargs
+    `add32` (`(apply + xs)` allocates an arg-seq every call) plus persistent-vector schedule/K
+    lookups cost proportionally *more* than JVM boxing does, so removing them (Int32Array +
+    fixed-arity `+` + `| 0`) buys more. The reference ordering among the portable strategies is
+    unchanged (precompute 135k > transient 142k > rolling 145k), exactly as round 8.
+26. **Unifying result (rounds 7 + 9): the bottleneck was per-operation runtime overhead, not the
+    algorithm or the data structure.** JVM: boxed `Long` arithmetic. cljs/V8: arg-seq allocation
+    (varargs `add32`) + persistent-vector indexing. Each platform's fast path removes its own
+    overhead with that platform's primitive-numeric tool (`long-array`+`^long`+`unchecked-add` on
+    the JVM; `Int32Array`+fixed-arity+`| 0` on V8). Neither is portable, so the portable `.cljc`
+    reference stays the default and each fast path is opt-in via `sha256-bytes-with`.
+27. **Ch/Maj is STILL noise even in the V8 fast path** (round 3 survives a third time): the
+    champion's ch/maj varies run-to-run (or/alt, or/or, alt/naive), all `:v8` within ~4%. The
+    formula genuinely does not matter for throughput on either runtime, boxed or fast.
+
+**Meta (rounds 1-9):** the arc is complete and symmetric. The harness ordered the search by
+elimination (formula = noise; schedule data structure = no help; per-operation overhead = the
+lever), then delivered a platform-optimal fast path on *both* runtimes — ~2.3x JVM, ~3.5x V8 —
+while keeping one portable reference whose *relative* verdicts hold identically on JVM and V8.
+The repo now offers: `compress` (portable default), `compress-primitive` (JVM ~2.3x),
+`compress-v8` (V8 ~3.5x), all bit-identical, plus `midstate` for mining. Nine rounds, driven
+purely by taking the measured mechanism seriously each time.
+
+**Still open (non-portable / bigger):** SIMD batch-of-N-messages hashing (JVM Vector API / WASM
+SIMD) for the mining throughput case — the only remaining path that could beat *these* fast
+paths; and fully inlining ch/maj (finding 19 says small). Both are larger, non-portable efforts.

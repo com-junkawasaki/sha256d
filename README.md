@@ -37,20 +37,21 @@ completely different order than round-primitive rewrites -- see
 - **`sha256d.core`** -- FIPS 180-4 SHA-256 + Bitcoin's SHA-256d (`sha256(sha256(x))`),
   over plain sequences of byte values (ints 0-255), no host byte-array type in the hot
   path. This is the correctness oracle everything else in the repo is checked against.
-  Five compression strategies, all bit-identical and injectable via `sha256-bytes-with`:
-  `compress` (full 64-word precompute), `compress-rolling` (16-word window),
-  `compress-transient` (transient-built precompute), and JVM-only `compress-mutable`
+  Six compression strategies, all bit-identical and injectable via `sha256-bytes-with`:
+  portable `compress` (full 64-word precompute), `compress-rolling` (16-word window),
+  `compress-transient` (transient-built precompute); JVM-only `compress-mutable`
   (in-place `long-array`) and `compress-primitive` (in-place `long-array` **plus an
-  unboxed round loop** — the ~2.3x JVM fast path).
+  unboxed round loop** — the ~2.3x JVM fast path); and cljs-only `compress-v8`
+  (`Int32Array` + fixed-arity int32 arithmetic — the ~3.5x V8 fast path).
 - **`sha256d.ops`** -- the "gene pool", now `:ch (3) x :maj (3) x :schedule (5 on the JVM,
-  3 on cljs) = 45 candidates (27 on cljs)`. The Ch/Maj variants are `*-naive` (FIPS textbook), `*-alt` (the
+  4 on cljs) = 45 candidates on the JVM, 36 on cljs` (each platform includes its own fast path). The Ch/Maj variants are `*-naive` (FIPS textbook), `*-alt` (the
   OpenSSL/Bitcoin Core one-fewer-gate formulation), and `*-or` (the same pairwise terms
   as `*-naive`, OR'd instead of XOR'd -- valid because those terms are pairwise-disjoint
   / never-exactly-two-1), each proven algebraically equivalent to the FIPS textbook form
   in a doc-comment and re-checked exhaustively (all single-bit truth-table rows +
   randomized 32-bit words) in `test/sha256d/ops_test.cljc`. The `:schedule` gene is an
   implementation-strategy axis rather than a per-bit formula (`:precompute`, `:rolling`,
-  `:precompute-transient`, and JVM-only `:mutable` and `:primitive`).
+  `:precompute-transient`, JVM-only `:mutable` and `:primitive`, and cljs-only `:v8`).
 - **`sha256d.midstate`** -- Bitcoin block-header mining's classic optimization: cache
   the compression state after a header's constant first 64 bytes so each nonce attempt
   only re-runs the second block's 64 rounds, not the whole 80-byte header.
@@ -69,9 +70,9 @@ completely different order than round-primitive rewrites -- see
 
 (sha256d/bytes->hex (sha256d/sha256d-bytes (sha256d/str->bytes "abc"))) ; SHA256(SHA256(x))
 
-;; JVM-only ~2.3x fast path (unboxed round loop); identical output. Clojure only.
-(sha256d/sha256-bytes-with sha256d/compress-primitive (sha256d/str->bytes "abc")
-                           sha256d/ch sha256d/maj)
+;; Platform fast paths (~2.3x JVM / ~3.5x V8), identical output, opt-in via sha256-bytes-with:
+;;   JVM:  (sha256d/sha256-bytes-with sha256d/compress-primitive bytes sha256d/ch sha256d/maj)
+;;   cljs: (sha256d/sha256-bytes-with sha256d/compress-v8        bytes sha256d/ch sha256d/maj)
 ```
 
 ```clojure
@@ -149,15 +150,22 @@ honest across rounds:
 - **Round 8** (cross-platform validation): ran the *same* tournament under ClojureScript/node
   for the first time. The portable verdicts **reproduce on V8** — precompute best, transient
   worse, rolling last, Ch/Maj noise — so they weren't JVM-JIT artifacts. V8 is ~3x slower in
-  absolute terms (~135k ns/hash) and has no analog to the JVM-only `:primitive` win (JS numbers
-  are unboxed doubles; nothing for `^long` to fix), correctly confirming that win as JVM-only.
+  absolute terms (~135k ns/hash) and has no analog to the JVM-only `:primitive` win, confirming
+  that win as JVM-only — and predicting a *typed-array* V8 fast path is where the headroom is.
+- **Round 9** (the V8 fast path): added cljs-only `compress-v8` (`Int32Array` schedule + K,
+  fixed-arity int32 `+` with `| 0`, no varargs/persistent-vector overhead). It's the **first
+  cljs positive result and even bigger than the JVM's: ~3.5x** (~38k vs ~135k). The V8 win
+  exceeds the JVM's because the reference's varargs `add32` (arg-seq allocation) + persistent
+  lookups cost more on V8 than boxing does on the JVM. Ch/Maj is still noise even here.
 
-**Net (rounds 1-8):** the harness ordered the whole search space by elimination —
-Ch/Maj formula (noise) → schedule data structure (no help; rolling hurts) → **unboxed round
-arithmetic (~2.3x, the one real lever, JVM-only)** — rejecting four dead-ends before
-triangulating the bottleneck, then confirming the *portable* verdicts on both the JVM and V8.
+**Net (rounds 1-9):** the unifying result is that the bottleneck was per-operation *runtime
+overhead* — boxed `Long` on the JVM, arg-seq allocation + persistent-vector indexing on V8 —
+never the algorithm or data structure (Ch/Maj = noise across all 9 rounds; schedule strategy =
+no help). Each platform's fast path removes its own overhead with that platform's numeric tool.
+The repo ships one portable reference (`compress`, whose *relative* verdicts hold identically on
+JVM and V8) plus a platform-optimal opt-in fast path on each: `compress-primitive` (JVM ~2.3x)
+and `compress-v8` (V8 ~3.5x).
 
-Open follow-ups (all non-portable or infrastructural): fully inlining ch/maj to kill the last
-boxing island (likely small); a V8-specific `Int32Array`+`>>> 0` fast path (the cljs analog of
-the JVM `long-array` path); and a SIMD batch-of-N-messages hasher (JVM Vector API / WASM SIMD) —
-the only path that could beat the reference, for the mining use case.
+Open follow-ups (larger, non-portable): a SIMD batch-of-N-messages hasher (JVM Vector API / WASM
+SIMD) for mining throughput — the only remaining path that could beat these fast paths; and
+fully inlining ch/maj (measured-small).

@@ -234,6 +234,48 @@
               (recur (bit-and (unchecked-add t1 t2) 0xffffffff) a b c
                      (bit-and (unchecked-add d t1) 0xffffffff) e f g (inc t)))))))))
 
+;; CLJS-only fast path for V8 (round 9) — the symmetric counterpart to `compress-primitive`.
+;; On V8 there's no boxed-Long problem, but the reference pays for persistent-vector schedule
+;; /K lookups and the varargs `add32` (`(apply + xs)` allocates an arg-seq every call). This
+;; path uses an `Int32Array` schedule + K and fixed-arity int32 `+` with a `| 0` (`bit-or 0`)
+;; truncation — exactly V8's fast SMI/typed-array path. Values are signed int32 throughout,
+;; which is already how the reference behaves on cljs (`bit-and x 0xffffffff` == `x & -1` ==
+;; ToInt32) and is bit-correct for SHA-256, since `words->bytes` extracts bytes with `>>>`.
+#?(:cljs (defn ^:private v8-rotr [x n]
+           (bit-or (unsigned-bit-shift-right x n) (bit-shift-left x (- 32 n)))))
+#?(:cljs (defn ^:private v8-bsig0 [x] (bit-xor (v8-rotr x 2) (v8-rotr x 13) (v8-rotr x 22))))
+#?(:cljs (defn ^:private v8-bsig1 [x] (bit-xor (v8-rotr x 6) (v8-rotr x 11) (v8-rotr x 25))))
+#?(:cljs (defn ^:private v8-ssig0 [x] (bit-xor (v8-rotr x 7) (v8-rotr x 18) (unsigned-bit-shift-right x 3))))
+#?(:cljs (defn ^:private v8-ssig1 [x] (bit-xor (v8-rotr x 17) (v8-rotr x 19) (unsigned-bit-shift-right x 10))))
+#?(:cljs (def ^:private k-int32
+           (let [a (js/Int32Array. 64)] (dotimes [i 64] (aset a i (nth K i))) a)))
+
+#?(:cljs
+   (defn compress-v8
+     "CLJS-ONLY V8 fast path (round 9): `Int32Array` schedule + K, fixed-arity int32 adds
+     (`| 0` truncation), no persistent-vector lookups and no varargs `add32`. Bit-identical
+     to the reference `compress` (values are signed int32, which SHA-256's byte extraction via
+     `>>>` handles correctly). Still calls the injected ch-fn/maj-fn, so it composes with the
+     :ch/:maj genes. Excluded from the JVM pool; cljs correctness gate in cljs-verify."
+     ([state block] (compress-v8 state block ch maj))
+     ([[h0 h1 h2 h3 h4 h5 h6 h7] block ch-fn maj-fn]
+      (let [w  (js/Int32Array. 64)
+            bw (block->words block)]
+        (dotimes [i 16] (aset w i (nth bw i)))
+        (loop [t 16]
+          (when (< t 64)
+            (let [w2  (aget w (- t 2))  w7  (aget w (- t 7))
+                  w15 (aget w (- t 15)) w16 (aget w (- t 16))]
+              (aset w t (bit-or 0 (+ (+ (v8-ssig1 w2) w7) (+ (v8-ssig0 w15) w16)))))
+            (recur (inc t))))
+        (loop [a h0 b h1 c h2 d h3 e h4 f h5 g h6 h h7 t 0]
+          (if (= t 64)
+            [(bit-or 0 (+ h0 a)) (bit-or 0 (+ h1 b)) (bit-or 0 (+ h2 c)) (bit-or 0 (+ h3 d))
+             (bit-or 0 (+ h4 e)) (bit-or 0 (+ h5 f)) (bit-or 0 (+ h6 g)) (bit-or 0 (+ h7 h))]
+            (let [t1 (bit-or 0 (+ (+ (+ h (v8-bsig1 e)) (+ (ch-fn e f g) (aget k-int32 t))) (aget w t)))
+                  t2 (bit-or 0 (+ (v8-bsig0 a) (maj-fn a b c)))]
+              (recur (bit-or 0 (+ t1 t2)) a b c (bit-or 0 (+ d t1)) e f g (inc t)))))))))
+
 (defn compress-rolling
   "Same result as `compress`, but computes the message schedule in a 16-word rolling
   window just-in-time inside the round loop instead of materializing the full 64-word

@@ -77,9 +77,10 @@
    :schedule (merge {:precompute core/compress
                      :rolling    core/compress-rolling
                      :precompute-transient core/compress-transient}
-                    ;; JVM-only, non-portable fast paths (rounds 6-7): mutable long-array
-                    ;; schedule, and the same schedule + an UNBOXED round loop. Present on
-                    ;; Clojure, absent from the ClojureScript pool.
-                    #?(:clj {:mutable   core/compress-mutable
-                             :primitive core/compress-primitive}
-                       :cljs {}))})
+                    ;; Platform-specific, non-portable fast paths. JVM (rounds 6-7): mutable
+                    ;; long-array schedule, and the same schedule + an UNBOXED round loop.
+                    ;; cljs (round 9): an Int32Array/typed-array V8 fast path. Each is present
+                    ;; only in its own platform's pool.
+                    #?(:clj  {:mutable   core/compress-mutable
+                              :primitive core/compress-primitive}
+                       :cljs {:v8 core/compress-v8}))})

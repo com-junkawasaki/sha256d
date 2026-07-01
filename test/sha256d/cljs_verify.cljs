@@ -27,14 +27,22 @@
                            [_ maj-fn] (:maj ops/gene-pool)
                            [_ compress-fn] (:schedule ops/gene-pool)]
                        (core/sha256-bytes-with compress-fn msg ch-fn maj-fn)))))
-    (check "alternate schedule strategies (rolling, transient) match reference across sizes"
+    (check "alternate schedule strategies (rolling, transient, v8) match reference across sizes"
            (every? (fn [n]
                      (let [msg (vec (map #(mod (* 37 (inc %)) 256) (range n)))
                            ref (core/sha256-bytes msg)]
                        (and (= ref (core/sha256-bytes-with core/compress-rolling msg core/ch core/maj))
                             ;; also exercises transient-vector nth reads under cljs
-                            (= ref (core/sha256-bytes-with core/compress-transient msg core/ch core/maj)))))
+                            (= ref (core/sha256-bytes-with core/compress-transient msg core/ch core/maj))
+                            ;; the round-9 Int32Array V8 fast path
+                            (= ref (core/sha256-bytes-with core/compress-v8 msg core/ch core/maj)))))
                    (range 0 130)))
+    (check "compress-v8 composes correctly with every ch/maj gene combination"
+           (let [msg (core/str->bytes "compose-v8-with-ch-maj-genes")
+                 ref (core/sha256-bytes msg)]
+             (every? #(= ref %)
+                     (for [[_ ch-fn] (:ch ops/gene-pool) [_ maj-fn] (:maj ops/gene-pool)]
+                       (core/sha256-bytes-with core/compress-v8 msg ch-fn maj-fn)))))
     (check "midstate header-hash matches no-caching reference (20 random headers)"
            (every? (fn [_]
                      (let [header (vec (repeatedly ms/header-length-bytes #(rand-int 256)))]
