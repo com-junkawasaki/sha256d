@@ -188,13 +188,16 @@ V8) plus a platform-optimal opt-in fast path on each (`compress-primitive-inline
 - **Round 12** (mining payoff): composed midstate + the fast compress into `search-nonce` —
   **~4.4x** per-nonce over naive full-header hashing (1.59x midstate × 2.78x fast path, stacking
   cleanly), bit-identical (finds the same winning nonce).
-- **Round 13** (across-core): `search-nonce-parallel` splits the nonce range over cores. It does
-  **not** scale linearly — ~4.6x on 10 cores (46% efficiency), plateauing because the per-nonce
-  allocation churn drives shared young-gen GC (+ Apple Silicon P/E-core mix). Notably this
-  *re-frames rounds 5-6*: reducing allocation was a dead end single-thread, but allocation governs
-  the parallel ceiling — motivating an allocation-free per-nonce path (round 14).
+- **Round 13** (across-core): `search-nonce-parallel` splits the nonce range over cores — ~4.6x on
+  10 cores (peak ~272k nonce/s), not linear.
+- **Round 14** (diagnose the plateau): two cheap diagnostics showed the ~4.6x ceiling is **not**
+  allocation/GC (negligible: <1% pause, 14→16 collections) but **all-core turbo frequency scaling** —
+  a single thread drops to 46% of its solo rate when all cores are hot (26.7k vs 57.9k nonce/s),
+  and 46% × 10 = 4.6 exactly. So `search-nonce-parallel` scales as well as the hardware allows; the
+  "efficiency loss" is the CPU's frequency governor, not software. Refuted round 13's allocation
+  hypothesis (and correctly avoided building the allocation-free path it proposed).
 
-Open frontiers: an allocation-free per-nonce path (lift the parallel scaling ceiling, newly
-motivated by round 13); and a **hardware-SIMD** batch-of-N-messages hasher (JVM Vector API / WASM
-SIMD) — round 11 confirmed the win requires wide SIMD registers, not interleaving. Both are
-non-portable. Everything cheaper has been tried and measured.
+Sole remaining frontier: a **hardware-SIMD** batch-of-N-messages hasher (JVM Vector API / WASM
+SIMD) — round 11 confirmed the win requires wide SIMD registers, not interleaving; it raises
+per-core lane throughput, orthogonal to round 14's all-core frequency ceiling. Non-portable, and
+everything cheaper has been tried and measured (allocation never mattered anywhere — rounds 5-6, 13-14).

@@ -698,7 +698,9 @@ scans; 10-core Apple Silicon; min-of-3):
     degradation fits this. (b) Apple Silicon heterogeneity: the 10 cores are a performance/efficiency
     mix, so cores added past the P-core count contribute less. Disentangling them (GC logs, core
     pinning, `-Xmn` tuning) is a follow-up; the *plateau* itself is solid and measured.
-39. **This retroactively re-frames rounds 5-6 — the most interesting finding of the round.** Reducing
+39. **[⚠ REFUTED by round 14 — both causes above were wrong. GC is negligible (0.1%→0.8%); the
+    plateau is all-core turbo frequency scaling, a hardware effect no code change addresses.]**
+    This retroactively re-frames rounds 5-6 — the most interesting finding of the round. Reducing
     schedule allocation (transient/mutable) was a measured DEAD END *single-thread* (rounds 5-6:
     allocation was never the single-thread bottleneck — boxing/overhead was, per round 7). But round
     13's cause (a) says allocation becomes a real bottleneck *under parallelism*, because the
@@ -715,3 +717,57 @@ machine (~21x a naive single-thread reference at 13k nonce/s), all bit-identical
 frontiers are now two, both about *allocation and lanes*: an allocation-free per-nonce path (round
 14, to lift the parallel ceiling — newly motivated) and hardware-SIMD multi-buffer (still the big
 non-portable one).
+
+## 2026-07-02 (round 14) — diagnosed the parallel plateau: it's turbo frequency scaling, not allocation
+
+Round 13 proposed building an allocation-free per-nonce path to lift the ~4.6x parallel ceiling,
+blaming GC/allocation contention (cause a) or Apple Silicon P/E cores (cause b). Before building
+anything, round 14 ran two cheap diagnostics — and they refuted the whole premise.
+
+**Diagnostic 1 — GC (via `GarbageCollectorMXBean`), scanning 400k nonces:**
+```
+ 1 thread : wall=6721ms  gc-collections=14  gc-pause=10ms (0.1% of wall)   59512 nonce/s
+10 threads: wall=1431ms  gc-collections=16  gc-pause=11ms (0.8% of wall)  279526 nonce/s
+```
+GC is negligible at BOTH — 14 vs 16 collections, <1% pause. The JVM's thread-local allocation
+buffers (TLABs) absorb the per-nonce `long-array`/vector churn without contention.
+
+**Diagnostic 2 — isolate frequency scaling (single-thread scan, alone vs all cores hot):**
+```
+single-thread ALONE:          57855 nonce/s
+single-thread, ALL CORES HOT:  26682 nonce/s  (46% of alone; 9 background busy-spinners)
+per-thread rate at 10 threads: ~27900 nonce/s (279k/10)
+```
+A single scanning thread drops to 46% of its solo rate the moment all cores are busy — and that
+26682 matches the ~27900 per-thread rate under real 10-way parallelism. That is the smoking gun.
+
+**Findings:**
+
+40. **Round 13's cause (a) is REFUTED: GC/allocation is NOT the parallel cap** (0.1% -> 0.8% pause,
+    +2 collections). Eliminating all allocation could gain at most ~0.8%, so the round-13
+    allocation-free-path hypothesis (finding 39) is not worth building — and the cheap diagnostic
+    is exactly what stopped me from building it. Finding 39's "allocation matters under parallelism,
+    re-framing rounds 5-6" is wrong: allocation matters neither single-thread NOR in parallel.
+41. **The plateau is entirely all-core turbo frequency scaling.** One active core boosts to a high
+    turbo clock (~57.9k nonce/s); with all cores busy each runs at the lower all-core base clock
+    (~26.7k, 46%). 46% x 10 cores = 4.6 -> exactly the measured 4.63x plateau, and single-thread-
+    all-cores-hot (26.7k) == per-thread-at-10 (27.9k) confirms it directly. This is the CPU's
+    power/thermal governor, not software: no code change (allocation-free path, different pool,
+    core pinning) can raise it, because the physical per-core clock is what drops.
+42. **Reframe: `search-nonce-parallel` is NOT inefficient — it scales as well as the hardware
+    allows.** The "46% efficiency" is not overhead or contention; it's the correct all-core-vs-
+    single-core frequency ratio. Measured against the *all-core* per-thread rate the scaling is
+    essentially perfect (10 cores each doing their all-core-clock share). The only reason "10x"
+    looked achievable was that the 1-thread baseline was measured at boosted clock — an
+    apples-to-oranges baseline the diagnostic corrected.
+
+**Meta (rounds 1-14):** the cheapest round produced one of the clearest results — two ~30-line
+diagnostics refuted an expensive-to-build hypothesis and quantitatively nailed the true cause
+(46% x 10 = 4.6x). This is the measure-first discipline's sharpest payoff in the whole series:
+rounds 4-6, 10, 13 all *guessed* that allocation mattered somewhere, and it never did — not in the
+schedule build, not single-thread, not in parallel. The one true single-hash lever was always
+per-operation overhead (boxing/IFn), and the one true parallel limit is the CPU's frequency
+governor. No code artifact this round — the right outcome, since the diagnostic showed the
+proposed optimization would not help. The sole remaining frontier is unchanged: hardware-SIMD
+multi-buffer (non-portable), which raises *per-core* lane throughput and is orthogonal to the
+all-core frequency ceiling measured here.
