@@ -171,7 +171,14 @@ ships one portable reference (`compress`, whose *relative* verdicts hold identic
 V8) plus a platform-optimal opt-in fast path on each (`compress-primitive-inline` ~2.7x JVM,
 `compress-v8-inline` ~3.6x V8).
 
-Only genuinely-open frontier (larger, non-portable): a SIMD batch-of-N-messages hasher (JVM
-Vector API / WASM SIMD) for mining throughput — it changes the API shape (hash N nonces at once)
-and is the only remaining path that could beat these fast paths. Everything cheaper has been
-tried and measured.
+- **Round 11** (software multi-buffer): tested whether interleaving 2 independent hash lanes in
+  one loop fills SHA-256's per-round dependency-chain pipeline bubbles (the portable, no-SIMD
+  version of hardware multi-buffer). **Refuted: ~6% slower** — interleaving doubles the live state
+  past the register file and spills to stack; the register-pressure cost exceeds the ILP gain.
+  This closes the last *portable* avenue.
+
+Only genuinely-open frontier (larger, non-portable): a **hardware-SIMD** batch-of-N-messages
+hasher (JVM Vector API / WASM SIMD) for mining throughput — round 11 confirmed empirically that
+the win requires wide SIMD registers (which hold N lanes without spilling), not the interleaving
+idea itself. It changes the API shape (hash N nonces at once). Everything cheaper has been tried
+and measured.

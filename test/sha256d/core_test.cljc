@@ -75,3 +75,17 @@
          (let [msg (core/str->bytes "compose-primitive-with-ch-maj-genes")]
            (is (= (core/sha256-bytes msg)
                   (core/sha256-bytes-with core/compress-primitive msg ch-fn maj-fn))))))))
+
+#?(:clj
+   (deftest compress-2way-equivalence-test
+     (testing "each lane of the interleaved 2-way compress is bit-identical to the single-lane
+               compress-primitive-inline, on many random (state, block) pairs"
+       (let [rng (java.util.Random. 42)
+             rand-word (fn [] (bit-and (.nextLong rng) 0xffffffff))
+             rand-state (fn [] (vec (repeatedly 8 rand-word)))
+             rand-block (fn [] (vec (repeatedly 64 #(.nextInt rng 256))))]
+         (dotimes [_ 300]
+           (let [s1 (rand-state) b1 (rand-block) s2 (rand-state) b2 (rand-block)
+                 [o1 o2] (core/compress-primitive-2way s1 b1 s2 b2)]
+             (is (= (core/compress-primitive-inline s1 b1) o1))
+             (is (= (core/compress-primitive-inline s2 b2) o2))))))))

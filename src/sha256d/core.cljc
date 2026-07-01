@@ -272,6 +272,62 @@
               (recur (bit-and (unchecked-add t1 t2) 0xffffffff) a b c
                      (bit-and (unchecked-add d t1) 0xffffffff) e f g (inc t)))))))))
 
+#?(:clj
+   (defn compress-primitive-2way
+     "JVM-only (round 11): compress TWO independent (state, block) lanes in ONE interleaved
+     unboxed round loop, returning `[state1' state2']`. Each lane is exactly
+     `compress-primitive-inline`; interleaving tests the multi-buffer/ILP hypothesis — SHA-256's
+     per-round dependency chain (each round needs the previous a/e) leaves superscalar pipeline
+     bubbles, and a second independent lane can fill them for higher throughput per hash without
+     any SIMD. This is the software analog of hardware multi-buffer SHA. Bit-identical per lane
+     to `compress-primitive-inline`; JVM-only, out of the gene pool, for head-to-head benchmarks.
+
+     RESULT (round 11, docs/evolution-log.md finding 31): the hypothesis is REFUTED — this is
+     ~6% *slower* than two sequential `compress-primitive-inline` calls, because interleaving two
+     lanes doubles the live state (16 state longs) past the register file and spills to stack;
+     the register-pressure cost exceeds the ILP gain. Kept as a documented negative result, NOT a
+     fast path — real multi-buffer speedups need wide SIMD registers (Vector API), not this."
+     [[p0 p1 p2 p3 p4 p5 p6 p7] block-a [q0 q1 q2 q3 q4 q5 q6 q7] block-b]
+     (let [^longs wa (long-array 64) ^longs wb (long-array 64)
+           ^longs karr k-array
+           ba (block->words block-a) bb (block->words block-b)]
+       (dotimes [i 16] (aset wa i (long (nth ba i))) (aset wb i (long (nth bb i))))
+       (loop [t 16]
+         (when (< t 64)
+           (aset wa t (long (add32 (small-sigma1 (aget wa (- t 2))) (aget wa (- t 7))
+                                   (small-sigma0 (aget wa (- t 15))) (aget wa (- t 16)))))
+           (aset wb t (long (add32 (small-sigma1 (aget wb (- t 2))) (aget wb (- t 7))
+                                   (small-sigma0 (aget wb (- t 15))) (aget wb (- t 16)))))
+           (recur (inc t))))
+       (loop [a1 (long p0) b1 (long p1) c1 (long p2) d1 (long p3) e1 (long p4) f1 (long p5) g1 (long p6) h1 (long p7)
+              a2 (long q0) b2 (long q1) c2 (long q2) d2 (long q3) e2 (long q4) f2 (long q5) g2 (long q6) h2 (long q7)
+              t 0]
+         (if (= t 64)
+           [[(bit-and (unchecked-add (long p0) a1) 0xffffffff) (bit-and (unchecked-add (long p1) b1) 0xffffffff)
+             (bit-and (unchecked-add (long p2) c1) 0xffffffff) (bit-and (unchecked-add (long p3) d1) 0xffffffff)
+             (bit-and (unchecked-add (long p4) e1) 0xffffffff) (bit-and (unchecked-add (long p5) f1) 0xffffffff)
+             (bit-and (unchecked-add (long p6) g1) 0xffffffff) (bit-and (unchecked-add (long p7) h1) 0xffffffff)]
+            [(bit-and (unchecked-add (long q0) a2) 0xffffffff) (bit-and (unchecked-add (long q1) b2) 0xffffffff)
+             (bit-and (unchecked-add (long q2) c2) 0xffffffff) (bit-and (unchecked-add (long q3) d2) 0xffffffff)
+             (bit-and (unchecked-add (long q4) e2) 0xffffffff) (bit-and (unchecked-add (long q5) f2) 0xffffffff)
+             (bit-and (unchecked-add (long q6) g2) 0xffffffff) (bit-and (unchecked-add (long q7) h2) 0xffffffff)]]
+           (let [k   (aget karr t)
+                 ;; lane 1
+                 chv1 (bit-xor (bit-and e1 f1) (bit-and (bit-not e1) g1))
+                 mjv1 (bit-xor (bit-and a1 b1) (bit-and a1 c1) (bit-and b1 c1))
+                 x1  (bit-and (unchecked-add (unchecked-add (unchecked-add h1 (bsig1* e1))
+                                                            (unchecked-add chv1 k)) (aget wa t)) 0xffffffff)
+                 y1  (bit-and (unchecked-add (bsig0* a1) mjv1) 0xffffffff)
+                 ;; lane 2 (independent — fills lane 1's dependency-chain bubbles)
+                 chv2 (bit-xor (bit-and e2 f2) (bit-and (bit-not e2) g2))
+                 mjv2 (bit-xor (bit-and a2 b2) (bit-and a2 c2) (bit-and b2 c2))
+                 x2  (bit-and (unchecked-add (unchecked-add (unchecked-add h2 (bsig1* e2))
+                                                            (unchecked-add chv2 k)) (aget wb t)) 0xffffffff)
+                 y2  (bit-and (unchecked-add (bsig0* a2) mjv2) 0xffffffff)]
+             (recur (bit-and (unchecked-add x1 y1) 0xffffffff) a1 b1 c1 (bit-and (unchecked-add d1 x1) 0xffffffff) e1 f1 g1
+                    (bit-and (unchecked-add x2 y2) 0xffffffff) a2 b2 c2 (bit-and (unchecked-add d2 x2) 0xffffffff) e2 f2 g2
+                    (inc t))))))))
+
 ;; CLJS-only fast path for V8 (round 9) — the symmetric counterpart to `compress-primitive`.
 ;; On V8 there's no boxed-Long problem, but the reference pays for persistent-vector schedule
 ;; /K lookups and the varargs `add32` (`(apply + xs)` allocates an arg-seq every call). This

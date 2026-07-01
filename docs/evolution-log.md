@@ -559,3 +559,57 @@ removing per-operation runtime overhead — boxing/IFn-calls on the JVM, and (mu
 **Only genuinely-open frontier:** SIMD batch-of-N-messages hashing (JVM Vector API / WASM SIMD)
 for mining throughput — a materially larger, non-portable effort that changes the API shape
 (hash N nonces at once). Everything cheaper than that has now been tried and measured.
+
+## 2026-07-02 (round 11) — software 2-way multi-buffer interleave: refuted (~6% slower)
+
+Before reaching for real (non-portable, big) SIMD, round 11 tested the *portable* version of the
+batch idea. Hypothesis: SHA-256's round function has a long per-round dependency chain (each round
+needs the previous a/e), leaving superscalar pipeline bubbles — so manually interleaving 2
+independent hash lanes in one loop should fill them and raise throughput per hash, no SIMD needed
+(the software analog of hardware multi-buffer SHA). It's genuinely open (ILP gain vs register
+pressure), portable, and it's the mining workload (batch nonce search).
+
+- `sha256d.core/compress-primitive-2way` (JVM-only): two independent (state, block) lanes in one
+  interleaved unboxed round loop (a1..h1 + a2..h2), each lane exactly `compress-primitive-inline`.
+  Bit-identical per lane across 300 random (state, block) pairs (`compress-2way-equivalence-test`,
+  600 assertions); no reflection warnings. 19 tests / 7154 assertions.
+
+High-iter head-to-head (ns per single compression: 2-way total/2 vs two sequential inline calls,
+result-folded to defeat dead-code elimination):
+
+```
+run 0  seq=4136  2way=4384  2way/seq=1.060
+run 1  seq=4153  2way=4406  2way/seq=1.061
+run 2  seq=4163  2way=4418  2way/seq=1.061
+run 3  seq=4177  2way=4400  2way/seq=1.053
+run 4  seq=4144  2way=4401  2way/seq=1.062
+```
+
+**Findings:**
+
+31. **Hypothesis REFUTED: software 2-way interleave is ~6% SLOWER, not faster** (ratio 1.053-1.062,
+    tight across 5 runs). Manually filling the dependency-chain bubbles with a second lane does not
+    pay off on this JVM/CPU.
+32. **Why: register pressure beats the ILP gain.** Interleaving two lanes doubles the live state to
+    16 state longs (+ loop counter, two array refs), which exceeds the x86-64 general-purpose
+    register file, forcing spills to the stack every round. The spill/reload cost outweighs any
+    bubble-filling benefit — and the single-stream loop was already getting enough ILP from the
+    out-of-order window overlapping adjacent rounds. Hardware multi-buffer SHA wins precisely
+    because wide SIMD registers (AVX2/AVX-512, or the Vector API's `IntVector`) hold N lanes with
+    no spilling; a pure-Clojure/`long`-local interleave cannot replicate that and pays the pressure
+    without the benefit.
+33. **This closes the last *portable* avenue.** Every optimization reachable without leaving portable
+    Clojure or single-thread scalar execution has now been tried and measured: formula (noise),
+    schedule data structure (no help), per-operation overhead (the fast paths, the real win), and
+    now software multi-buffer (backfires). Genuine batch/lane throughput requires actual hardware
+    SIMD — confirmed empirically now, not just asserted. `compress-primitive-2way` is kept as a
+    documented negative result, explicitly not a fast path.
+
+**Meta (rounds 1-11):** the search is complete. The one thing that ever moved single-hash
+throughput was removing per-operation runtime overhead (rounds 7/9/10: boxing/IFn on JVM →
+~2.7x, arg-seq-alloc/persistent-indexing on V8 → ~3.6x). Formula, schedule structure, and
+software multi-buffer are all measured dead-ends. The only path left that could beat the fast
+paths is hardware SIMD multi-buffer (Vector API / WASM SIMD) — materially larger, non-portable,
+and changes the API to hash-N-nonces-at-once; deferred as the sole remaining frontier, now with
+the empirical result that its *software imitation doesn't work*, so the SIMD registers are the
+actual mechanism, not the interleaving idea per se.
