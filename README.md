@@ -2,14 +2,18 @@
 
 A portable **`.cljc` SHA-256 / Bitcoin SHA-256d** reference implementation, plus a
 small **evolutionary benchmark tournament** over interchangeable, individually-proven
-round-primitive formulations -- shaped like Google DeepMind's **AI co-scientist**
+round-primitive formulations -- shaped like Google DeepMind's **[AI
+co-scientist](https://research.google/blog/accelerating-scientific-breakthroughs-with-an-ai-co-scientist/)**
 (Generation / Reflection / Ranking / Evolution / Proximity / Meta-review agents under a
-Supervisor) and **AlphaEvolve** (LLM-guided evolutionary code search over a scored
-program population), but scoped down to a finite, closed, non-LLM search: for a hash
-function, "close to correct" isn't a lower-scoring candidate the way a slower
-matrix-multiplication algorithm is in AlphaEvolve's search -- it's simply not SHA-256.
-Reflection here is therefore a hard correctness gate, applied before any benchmarking,
-never one term in a fitness score.
+Supervisor, an Elo-based ranking tournament, and self-play/recursive self-critique
+driving iterative improvement) and **AlphaEvolve** (LLM-guided evolutionary code search
+over a scored program population), but scoped down to a finite, closed, non-LLM search:
+for a hash function, "close to correct" isn't a lower-scoring candidate the way a
+slower matrix-multiplication algorithm is in AlphaEvolve's search -- it's simply not
+SHA-256. Reflection here is therefore a hard correctness gate, applied before any
+benchmarking, never one term in a fitness score, and there's no LLM-driven "debate" --
+Evolution's recombination is deterministic gene-crossover over a hand-verified pool,
+not self-play (see ADR-2607012300 for why: no Workflow/token cost per run).
 
 ## Why this shape
 
