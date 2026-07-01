@@ -10,9 +10,18 @@
   hard pass/fail filter applied before any benchmarking, never one term in a score.
 
   As sha256d.ops grows more genes (loop-unrolling degree, schedule-buffer reuse,
-  batch/lane-parallel hashing, ...) this search space grows with it; today it's
-  intentionally small (2 primitives x 2 variants each = 4 candidates) and mostly
-  demonstrates the shape of the loop rather than a big discovery.
+  batch/lane-parallel hashing, ...) this search space grows with it; today it's still
+  small (2 primitives x 3 variants each = 9 candidates) and mostly demonstrates the
+  shape of the loop rather than a big discovery.
+
+  Two design choices (added round 3, see docs/evolution-log.md) make the generations
+  actually accumulate evidence rather than just re-measure: (1) Evolution keeps the
+  population diverse via a mutation step that reintroduces gene variants the elites
+  have dropped, so the search can't prematurely collapse to 2 candidates on Ranking
+  noise; (2) Ranking's Elo ratings PERSIST across generations (seeded from the prior
+  round, newcomers at 1000), so N generations over a stable diverse population pool
+  ~N times as many pairwise games into each rating -- the noise-averaging that finally
+  lets near-tied candidates separate.
 
   Entry point: `(run-tournament)` for defaults, or `clojure -M -m sha256d.evolve`."
   (:require [clojure.string :as str]
@@ -83,23 +92,26 @@
 (defn rank
   "Benchmarks every surviving candidate, then pairwise-compares ns/hash (faster wins,
   within 1% counts as a draw to avoid over-claiming a winner from measurement noise)
-  and feeds each comparison into an Elo update starting at rating 1000. Returns
-  candidates sorted fastest (highest Elo) first."
-  [pool candidates payload bench-opts]
-  (let [timed (mapv (fn [c]
+  and feeds each comparison into an Elo update. Ratings are seeded from `prior-ratings`
+  (a map candidate->elo; any candidate not seen before starts at 1000), so evidence
+  ACCUMULATES across generations instead of resetting each round. Returns candidates
+  sorted fastest (highest Elo) first, each carrying its updated :elo."
+  ([pool candidates payload bench-opts] (rank pool candidates payload bench-opts {}))
+  ([pool candidates payload bench-opts prior-ratings]
+   (let [timed (mapv (fn [c]
                        (let [{:keys [ch maj]} (candidate->fns pool c)]
                          {:candidate c
                           :ns-per-hash (bench-ns-per-hash #(core/sha256-bytes % ch maj) payload bench-opts)}))
                      candidates)
-        n (count timed)
-        ratings (atom (vec (repeat n 1000.0)))]
-    (doseq [i (range n) j (range (inc i) n)]
-      (let [ti (:ns-per-hash (timed i)) tj (:ns-per-hash (timed j))
-            score-i (cond (< ti (* 0.99 tj)) 1.0 (> ti (* 1.01 tj)) 0.0 :else 0.5)
-            [ri' rj'] (elo-update (@ratings i) (@ratings j) score-i)]
-        (swap! ratings assoc i ri' j rj')))
-    (->> (map #(assoc %1 :elo %2) timed @ratings)
-         (sort-by :elo >))))
+         n (count timed)
+         ratings (atom (mapv #(get prior-ratings (:candidate %) 1000.0) timed))]
+     (doseq [i (range n) j (range (inc i) n)]
+       (let [ti (:ns-per-hash (timed i)) tj (:ns-per-hash (timed j))
+             score-i (cond (< ti (* 0.99 tj)) 1.0 (> ti (* 1.01 tj)) 0.0 :else 0.5)
+             [ri' rj'] (elo-update (@ratings i) (@ratings j) score-i)]
+         (swap! ratings assoc i ri' j rj')))
+     (->> (map #(assoc %1 :elo %2) timed @ratings)
+          (sort-by :elo >)))))
 
 ;; --- Proximity: collapse practically-indistinguishable results ---------------------
 
@@ -119,22 +131,37 @@
            []
            ranked)))
 
-;; --- Evolution: keep elites, recombine survivors' genes -----------------------------
+;; --- Evolution: elitism + crossover + mutation --------------------------------------
 
 (defn evolve-round
-  "Elites (top `elite-n` by Elo) pass through unchanged; the rest of next round's
-  population is every recombination (crossover) of gene choices seen among the
-  elites. With today's 2x2 gene pool this mostly re-affirms the same 4 candidates
-  under fresh measurement; it generalizes as sha256d.ops grows more genes/variants."
-  [ranked elite-n]
-  (let [elites (mapv :candidate (take elite-n ranked))]
-    (distinct
-     (into elites
-           (reduce (fn [pop gene]
-                     (for [c pop variant (distinct (map #(get % gene) elites))]
-                       (assoc c gene variant)))
-                   elites
-                   (keys (first elites)))))))
+  "Builds the next generation's population from the top `elite-n` candidates by Elo:
+
+    - elitism:  the elites pass through unchanged.
+    - crossover: every recombination of gene values seen among the elites.
+    - mutation:  for each gene, every variant present in the full `pool` but ABSENT
+                 from the elites, grafted onto the top elite.
+
+  The mutation step is the round-3 fix for the premature-convergence flaw documented
+  in docs/evolution-log.md rounds 1-2: without it, crossover can only ever reuse gene
+  values already among the elites, so the moment the elites happen to agree on a gene
+  (a coin-flip given Ranking's noise), that gene's other variants disappear for the
+  rest of the run -- genetic drift with no real selective pressure behind it. Mutation
+  keeps every pool variant represented each generation, so the population stays diverse
+  and the persistent Elo (see `rank`) can accumulate evidence over a stable field."
+  [pool ranked elite-n]
+  (let [elites    (mapv :candidate (take elite-n ranked))
+        genes     (keys (first elites))
+        top       (first elites)
+        crossover (reduce (fn [pop gene]
+                            (for [c pop variant (distinct (map #(get % gene) elites))]
+                              (assoc c gene variant)))
+                          elites
+                          genes)
+        mutants   (for [gene genes
+                        variant (keys (get pool gene))
+                        :when (not-any? #(= variant (get % gene)) elites)]
+                    (assoc top gene variant))]
+    (distinct (concat elites crossover mutants))))
 
 ;; --- Meta-review + Supervisor ---------------------------------------------------------
 
@@ -142,6 +169,7 @@
   {:generation generation
    :champion (:candidate (first ranked))
    :champion-ns-per-hash (:ns-per-hash (first ranked))
+   :population-size (count ranked)
    :cluster-sizes (mapv count clusters)
    :disqualified disqualified
    :leaderboard (mapv #(select-keys % [:candidate :ns-per-hash :elo]) ranked)})
@@ -161,21 +189,24 @@
           generations 3
           elite-n 2
           bench-opts {:iters 200 :reps 7}}}]
-   (loop [gen 1 population (generate-candidates pool) last-review nil]
+   (loop [gen 1 population (generate-candidates pool) ratings {}]
      (let [disqualified (remove #(reflect pool %) population)
            surviving (filter #(reflect pool %) population)
-           ranked (rank pool surviving payload bench-opts)
+           ranked (rank pool surviving payload bench-opts ratings)
+           ;; carry every ranked candidate's updated Elo into the next generation
+           ratings' (into {} (map (juxt :candidate :elo)) ranked)
            clusters (cluster-by-proximity ranked)
            review (meta-review gen ranked clusters disqualified)]
        (if (>= gen generations)
          review
-         (recur (inc gen) (evolve-round ranked elite-n) review))))))
+         (recur (inc gen) (evolve-round pool ranked elite-n) ratings'))))))
 
 ;; --- reporting -----------------------------------------------------------------------
 
-(defn report->markdown [{:keys [generation champion champion-ns-per-hash cluster-sizes leaderboard disqualified]}]
+(defn report->markdown [{:keys [generation champion champion-ns-per-hash population-size cluster-sizes leaderboard disqualified]}]
   (str "## Generation " generation "\n\n"
        "- champion: `" (pr-str champion) "` (" champion-ns-per-hash " ns/hash)\n"
+       "- population size (diversity): " population-size "\n"
        "- proximity clusters (sizes): " (str/join ", " cluster-sizes) "\n"
        "- disqualified: " (count disqualified) "\n\n"
        "| candidate | ns/hash | elo |\n|---|---|---|\n"

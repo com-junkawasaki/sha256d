@@ -67,8 +67,10 @@ run 3: champion {:ch :alt, :maj :alt} (46046.88 ns/hash) -- runner-up {:ch :alt,
 
 **Findings:**
 
-3. **The `*-naive` variants are consistently eliminated by generation 3, in all 3 runs,
-   for both genes.** Unlike round 1's inconclusive Ch-alt-vs-naive comparison (which was
+3. **[⚠ LARGELY SUPERSEDED by round 3, finding 6 — this "signal" turned out to be
+   substantially an artifact of the diversity-loss bug in finding 5, not a real speed
+   difference.]** The `*-naive` variants are consistently eliminated by generation 3, in
+   all 3 runs, for both genes. Unlike round 1's inconclusive Ch-alt-vs-naive comparison (which was
    only ever a 2-way fight), with `or` in the pool as a second same-cost-as-`alt`
    competitor, `naive` (one more gate than either) loses often enough in early-generation
    pairwise comparisons that `evolve-round`'s elitism drops it for good. This is
@@ -92,3 +94,55 @@ run 3: champion {:ch :alt, :maj :alt} (46046.88 ns/hash) -- runner-up {:ch :alt,
 **Still not done:** node/cljs benchmarking of the tournament itself; the diversity-loss
 fix; genes beyond Ch/Maj (loop-unrolling degree, schedule-buffer reuse, batch/lane-
 parallel hashing).
+
+## 2026-07-01 (round 3) — fixed the harness, and it dissolved round 2's "finding"
+
+Fixed the two flaws the earlier rounds documented, in `sha256d.evolve`:
+
+- **Mutation (fixes finding 5, the premature convergence):** `evolve-round` now, in
+  addition to elitism + crossover, reintroduces every pool variant the elites have
+  dropped (grafted onto the top elite). The population no longer collapses to 2 -- it's
+  a stable 5 every run now (`population size (diversity): 5` in all 3 runs below).
+- **Persistent Elo (makes generations cumulative):** `rank` seeds each generation's Elo
+  from the previous generation's ratings (newcomers at 1000) instead of resetting to
+  1000 every round, so 3 generations over a stable diverse field pool ~3x as many
+  pairwise games into each rating. Elo spread widened from the old artificial ±16 to
+  ~120 points (≈971–1090), i.e. the ratings now carry real accumulated evidence.
+
+`clojure -M:test` (16 tests, 5167 assertions, incl. new `evolve-round-mutation-test` and
+`rank-persistent-ratings-test`) and the cljs proof (5/5) both pass. Three runs:
+
+```
+run 1: champion {:ch :naive, :maj :alt} (45442 ns/hash), pop 5, clusters [1,1,3]
+run 2: champion {:ch :alt,   :maj :alt} (45845 ns/hash), pop 5, clusters [1,2,1,1]
+run 3: champion {:ch :alt,   :maj :alt} (46471 ns/hash), pop 5, clusters [3,1,1]
+```
+
+**Findings:**
+
+6. **Fixing the harness dissolved round 2's headline result — an important, humbling
+   meta-finding.** Round 2 (finding 3) reported that the `*-naive` forms were
+   "consistently eliminated," read as real evidence the one-fewer-gate `alt`/`or` forms
+   are faster. Round 3 shows that was **largely an artifact of the diversity-loss bug
+   itself**: round 2's `evolve-round` *dropped* `naive` from the population early (on
+   noise) and then never re-benchmarked it, so of course it never appeared in the final
+   leaderboard — that's not the same as `naive` losing on speed. With mutation now
+   keeping `naive` in the field and re-measured every generation, **`{:ch :naive, :maj
+   :alt}` actually wins run 1 outright.** All candidates now sit within ~3% of each other
+   (45.4k–47.0k ns/hash) with heavy proximity-clustering (ties). So the honest verdict
+   reverts to round 1's: at this payload and measurement budget, the Ch/Maj *formula*
+   choice is within noise. The lesson is the general one — don't trust a search harness's
+   "discoveries" until its own convergence behavior is sound; a premature-convergence bug
+   manufactures crisp-looking signals out of noise.
+7. **The only weak surviving lean:** `:maj :alt` is the champion's Maj in all 3 runs, and
+   `:ch :alt` is in the top two in all 3. It's suggestive but NOT decisive — the gaps are
+   inside the proximity tolerance and `:ch :naive` still won once. Not claimed as a result.
+8. **Diversity fix confirmed end-to-end** (finding 5 closed): population is a stable 5,
+   and `run-tournament-smoke-test` now asserts `population-size >= 3` so a regression back
+   to collapse would fail CI.
+
+**Still not done:** node/cljs benchmarking of the tournament itself (evolve.cljc's cljs
+branches compile but the loop has still only been *run* on the JVM); a payload/'budget
+where the primitive is a bigger fraction of total work, to actually resolve alt-vs-or if
+it's resolvable at all; genes beyond Ch/Maj (loop-unrolling degree, schedule-buffer
+reuse, batch/lane-parallel hashing) — the real efficiency frontier, per round 1 finding 1.

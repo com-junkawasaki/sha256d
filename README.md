@@ -95,12 +95,21 @@ on a `long` is 64-bit-aware and masked the bug).
 
 ## Status / follow-ups
 
-See `docs/evolution-log.md` for what the tournament has actually found so far: round 1
-(2x2 gene pool) found no stable champion -- Ch/Maj formula choice was within benchmark
-noise. Round 2 grew the pool to 3x3 (added `ch-or`/`maj-or`) and found a clearer signal:
-the `*-naive` forms are consistently eliminated by generation 3 across repeated runs
-(real evidence the one-fewer-gate `alt`/`or` forms measurably help), while `alt` vs `or`
-remain a toss-up. The generation-over-generation diversity loss in `evolve-round`
-(convergence to 2 candidates regardless of pool size) is still open. Growing the gene
-pool further (loop-unrolling degree, schedule-buffer reuse, batch/lane-parallel
-hashing) and running the tournament under node (not just JVM) remain open follow-ups.
+See `docs/evolution-log.md` for what the tournament has actually found, kept deliberately
+honest across rounds:
+
+- **Round 1** (2x2 pool): no stable champion — Ch/Maj formula choice within benchmark noise.
+- **Round 2** (grew to 3x3 with `ch-or`/`maj-or`): *appeared* to find that the `*-naive`
+  forms get eliminated — but see round 3.
+- **Round 3** (fixed the harness): added a **mutation** step so the population stops
+  prematurely collapsing to 2 candidates, and made **Elo persist across generations** so
+  the rounds accumulate evidence. Doing so **dissolved round 2's result** — that
+  "elimination" was largely an artifact of the diversity-loss bug (a dropped candidate
+  simply stopped being benchmarked); with `naive` kept in the field it actually wins one
+  run. Honest verdict: at this payload/budget the Ch/Maj *formula* choice is within noise.
+  The real efficiency frontier is structural (the `sha256d.midstate` ~2x win, and genes
+  not yet in the pool), not the round-primitive rewrite.
+
+Open follow-ups: running the tournament under node (not just the JVM); a payload where the
+primitive is a larger fraction of total work; and genes beyond Ch/Maj (loop-unrolling
+degree, schedule-buffer reuse, batch/lane-parallel hashing).
