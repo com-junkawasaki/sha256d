@@ -45,6 +45,11 @@
              (every? #(= ref %)
                      (for [[_ ch-fn] (:ch ops/gene-pool) [_ maj-fn] (:maj ops/gene-pool)]
                        (core/sha256-bytes-with core/compress-v8 msg ch-fn maj-fn)))))
+    (check "REAL Bitcoin genesis block: sha256d in display order == 000000000019d668...  (on V8, via the midstate path)"
+           (let [hex "0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a29ab5f49ffff001d1dac2b7c"
+                 header (vec (map (fn [i] (js/parseInt (subs hex (* 2 i) (+ 2 (* 2 i))) 16)) (range 80)))]
+             (= "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
+                (core/bytes->hex-reversed (ms/header-hash (ms/midstate header) (subvec header 64 80))))))
     (check "midstate header-hash matches no-caching reference (20 random headers)"
            (every? (fn [_]
                      (let [header (vec (repeatedly ms/header-length-bytes #(rand-int 256)))]

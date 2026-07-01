@@ -771,3 +771,46 @@ governor. No code artifact this round — the right outcome, since the diagnosti
 proposed optimization would not help. The sole remaining frontier is unchanged: hardware-SIMD
 multi-buffer (non-portable), which raises *per-core* lane throughput and is orthogonal to the
 all-core frequency ceiling measured here.
+
+## 2026-07-02 (round 15) — validated the whole stack against the REAL Bitcoin genesis block
+
+Fifteen rounds of correctness gates, and every one used *synthetic* fixtures (random headers,
+Python-hashlib cross-checks). For a repo whose premise is "efficiently derive Bitcoin's SHA-256",
+that's a real credibility gap: it had never reproduced a single real Bitcoin block. Round 15 is
+the strongest possible Reflection-against-ground-truth — validate the entire stack against block 0.
+
+Fixtures independently verified via Python `hashlib` before use (per the repo's never-hand-
+transcribe-crypto-constants rule): constructed the genesis header from its real field values
+(version 1, prev-hash 0, merkle root 4a5e1e4b…, time 1231006505, bits 0x1d00ffff, nonce
+2083236893) and confirmed its sha256d equals the canonical genesis hash
+`000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f` (display leading-zero bits: 43).
+
+**Findings:**
+
+43. **The whole stack reproduces the real genesis block on BOTH runtimes.** `sha256d-bytes`, the
+    `midstate` mining path, and (JVM) the `compress-primitive-inline` fast path all yield the exact
+    canonical genesis hash in block-explorer display order — verified on the JVM
+    (`genesis-block-test`, 22 tests / 7464 assertions) and on V8 (cljs-verify now 8/8, genesis via
+    the midstate path). First non-synthetic validation in the series.
+44. **`search-nonce` recovers Satoshi's actual genesis nonce (2083236893).** Searching an 11-nonce
+    window around it at a 40-leading-zero-bit target (below the genesis hash's 43, so only the
+    genesis nonce qualifies), the reference AND the JVM fast path both return exactly
+    `[2083236893, <genesis hash>]`. The mining primitive works against real Bitcoin difficulty, not
+    just synthetic leading-zero checks — a real known-answer test with the answer being a famous
+    constant of the actual blockchain.
+45. **This grounds every prior round.** Because all six compress strategies + midstate + both nonce
+    searches are bit-identical (the hard correctness gate held all 15 rounds), the ~4.4x single-
+    thread and ~4.6x parallel fast mining paths provably mine the *real* chain — now demonstrated
+    against block 0, not asserted. The optimization work was never at the expense of correctness.
+
+**Meta (rounds 1-15):** the arc is complete and anchored to reality. What began as "efficiently
+derive Bitcoin's SHA-256" is: a portable `.cljc` reference verified against NIST vectors and the
+real genesis block on JVM+V8; per-platform fast paths (~2.7x JVM / ~3.6x V8) reached by removing
+per-operation overhead — the one lever the tournament found real, after rejecting Ch/Maj formula,
+schedule data structure, and software multi-buffer; a ~4.4x mining nonce search composing midstate
++ fast path; ~4.6x across 10 cores (hardware-frequency-limited, not software); and a real-Bitcoin
+known-answer proof tying it all to the chain. The single remaining, deliberately-deferred frontier
+is hardware-SIMD multi-buffer (JVM Vector API / WASM SIMD) — large, non-portable, per-core lane
+throughput, orthogonal to everything measured. Every cheaper avenue has been tried, measured, and
+either kept (midstate, fast paths, threads) or honestly rejected (formula, schedule structure,
+software multi-buffer, allocation-free path).

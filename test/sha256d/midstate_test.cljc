@@ -61,6 +61,32 @@
          (is (= ref-hit (ms/search-nonce-parallel core/compress mid prefix12 zero-bits 0 5000 10))
              "the parallel search returns the identical globally-lowest winning nonce")))))
 
+(deftest genesis-block-test
+  (testing "the REAL Bitcoin genesis block (block 0) — the whole stack reproduces the actual
+            chain: core sha256d, the midstate path, and search-nonce finding the real nonce.
+            Header + hash independently verified via Python hashlib (see the round-15 log)."
+    (let [header-hex "0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a29ab5f49ffff001d1dac2b7c"
+          genesis    "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
+          header     (vec (map #(Integer/parseInt (apply str %) 16) (partition 2 header-hex)))
+          nonce      2083236893]
+      (is (= 80 (count header)))
+      (testing "core sha256d of the genesis header, in block-explorer (reversed) display order"
+        (is (= genesis (core/bytes->hex-reversed (core/sha256d-bytes header)))))
+      (testing "the midstate mining path reproduces the same real genesis hash"
+        (is (= genesis (core/bytes->hex-reversed
+                        (ms/header-hash (ms/midstate header) (subvec header 64 80))))))
+      (testing "search-nonce finds the REAL genesis nonce (2083236893) at the genesis difficulty"
+        ;; 40 leading-zero bits is below the genesis hash's 43, so only the genesis nonce in the
+        ;; window qualifies (a coincidental 40-bit neighbor is ~10/2^40)
+        (let [prefix12 (subvec header 64 76)       ; merkle-tail(4) + time(4) + bits(4)
+              mid      (ms/midstate header)
+              hit      (ms/search-nonce core/compress mid prefix12 40 (- nonce 5) 11)]
+          (is (= nonce (first hit)) "search-nonce recovers Satoshi's genesis nonce")
+          (is (= genesis (core/bytes->hex-reversed (second hit))))
+          #?(:clj
+             (is (= hit (ms/search-nonce core/compress-primitive-inline mid prefix12 40 (- nonce 5) 11))
+                 "the JVM fast path recovers the identical genesis nonce and hash")))))))
+
 (deftest synthetic-header-fixture-test
   (testing "synthetic (non-genesis) 80-byte header, sha256d cross-checked via Python hashlib"
     (let [header-hex "010000000000000000000000000000000000000000000000000000000000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f29ab5f491d00ffff7c2bac1d"

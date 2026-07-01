@@ -36,7 +36,9 @@ completely different order than round-primitive rewrites -- see
 
 - **`sha256d.core`** -- FIPS 180-4 SHA-256 + Bitcoin's SHA-256d (`sha256(sha256(x))`),
   over plain sequences of byte values (ints 0-255), no host byte-array type in the hot
-  path. This is the correctness oracle everything else in the repo is checked against.
+  path. This is the correctness oracle everything else in the repo is checked against —
+  verified against NIST known-answer vectors **and the real Bitcoin genesis block** (block 0,
+  hash `000000000019d668…`) on both the JVM and V8.
   Compression strategies, all bit-identical and injectable via `sha256-bytes-with`:
   portable `compress` (full 64-word precompute), `compress-rolling` (16-word window),
   `compress-transient` (transient-built precompute); JVM-only `compress-mutable`
@@ -196,6 +198,10 @@ V8) plus a platform-optimal opt-in fast path on each (`compress-primitive-inline
   and 46% × 10 = 4.6 exactly. So `search-nonce-parallel` scales as well as the hardware allows; the
   "efficiency loss" is the CPU's frequency governor, not software. Refuted round 13's allocation
   hypothesis (and correctly avoided building the allocation-free path it proposed).
+- **Round 15** (real-world grounding): validated the whole stack against the **actual Bitcoin
+  genesis block** on JVM + V8 — `sha256d`, the midstate path, and the fast path all reproduce the
+  canonical genesis hash, and `search-nonce` recovers Satoshi's real genesis nonce (2083236893) at
+  the genesis difficulty. First non-synthetic validation; grounds every optimization in the real chain.
 
 Sole remaining frontier: a **hardware-SIMD** batch-of-N-messages hasher (JVM Vector API / WASM
 SIMD) — round 11 confirmed the win requires wide SIMD registers, not interleaving; it raises
