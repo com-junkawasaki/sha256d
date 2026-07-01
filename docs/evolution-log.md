@@ -211,3 +211,66 @@ schedule that this repo's portability constraint rules out.
 proven; speed there — where V8's allocation behavior differs and rolling might fare
 differently — is not measured); a mutable-array JVM-only schedule as a separate,
 explicitly-non-portable experiment; genes for batch/lane-parallel hashing.
+
+## 2026-07-01 (round 5) — tested round 4's "it's the allocation" hypothesis; it failed
+
+Round 4 concluded rolling loses *because* per-step `subvec`/`conj` allocates. That's a
+causal claim, and the portable, idiomatic way to test it is transients — the standard
+Clojure tool for cutting allocation without leaving persistent-data-structure land. So:
+
+- `sha256d.core/extend-schedule-transient` + `compress-transient`: same full 64-word
+  precompute as `compress`, but the schedule is grown in a transient vector (`conj!`,
+  one `persistent!` before `run-rounds` reads it). Extracted the shared 64-round body
+  into a private `run-rounds` so `compress`/`compress-transient` differ *only* in how the
+  schedule is built. Proven bit-identical across 260 sizes + FIPS vectors, **including a
+  cljs check that transient-vector `nth` reads work under ClojureScript** (they do — the
+  round-3 "verify portability under node" reflex paid off again; this could have been a
+  cljs-only break and wasn't). Pool is now `:ch(3) x :maj(3) x :schedule(3) = 27`.
+  17 tests / 5729 assertions JVM + 6/6 cljs green.
+
+Three runs (top of each leaderboard + the transient and rolling entries):
+
+```
+run 1: champ {:ch :or,  :maj :alt, :precompute} 45659 (elo 1264); transient(or,alt) 46343 (elo 1017); rolling 49786 (elo 929)
+run 2: champ {:ch :or,  :maj :alt, :precompute} 46175 (elo 1242); transient(or,naive) 46961 (elo 999); rolling 50048 (elo 939)
+run 3: champ {:ch :alt, :maj :alt, :precompute} 45561 (elo 1259); transient(alt,alt) 49020 (elo 1069); rolling 50255 (elo 845)
+```
+
+**Findings:**
+
+12. **Hypothesis NOT supported: cutting schedule-build allocation (transient) did not
+    speed anything up.** A plain-`:precompute` candidate takes every champion slot across
+    all 3 runs; `:precompute-transient` never wins — it lands in the same noise band as
+    plain precompute, and in run 3 it's clearly *slower* (49020 vs the precompute pack's
+    45.4–47.8k). So reducing the persistent-`conj` allocation of the schedule build is a
+    wash-to-slightly-negative, not the hoped-for first positive result. Likely because
+    (a) `conj` onto a <64-element persistent vector is already cheap (small tries, JIT
+    escape-analysis), so there's little to save, and (b) `transient`/`persistent!` + the
+    transient `nth` path carry their own fixed overhead that 48 steps don't amortize.
+13. **This refines round 4's finding 10.** Rolling's ~7-10% penalty (re-confirmed here —
+    rolling is dead-last again in all 3 runs) is therefore *not* simply "allocation," or
+    the transient precompute would have helped. It's more specifically rolling's per-step
+    `subvec`-view-plus-`conj` (a larger, differently-shaped allocation than one trie node)
+    together with interleaving the schedule into the round loop, which stops the JIT from
+    optimizing a tight separable schedule pass. Cutting *precompute's* allocation, by
+    contrast, changes nothing measurable.
+14. **Conclusion for the schedule axis (3 strategies now tested):** plain `compress`
+    (persistent-vector precompute) is the best portable schedule strategy; both
+    alternatives are equal-or-worse. The schedule build/representation is a dead end for a
+    *portable* speedup — the reference was already near-optimal. Efficiency wins remain
+    structural (`sha256d.midstate`) or non-portable (mutable `int-array`, out of scope).
+
+**Meta (rounds 1-5):** five rounds, zero portable speedups found — every Ch/Maj formula is
+within noise, and both schedule alternatives are ties-or-losses. That is itself the honest
+result: **in portable persistent-Clojure the reference implementation is already at the
+efficient frontier for a single-stream hash; the only real levers are algorithmic/structural
+(midstate, already in the repo) or require abandoning `.cljc` (mutable buffers, SIMD/lane
+parallelism).** The co-scientist harness earned its keep less by finding a faster SHA-256
+than by *rejecting* three plausible "optimizations" (naive-elimination, rolling, transient)
+that don't survive an honest, convergence-sound tournament.
+
+**Still not done:** node/cljs *benchmarking* (V8 allocation differs — transient/rolling
+might rank differently there); a deliberately non-`.cljc` JVM-only mutable-`int-array`
+schedule to confirm the "leaving persistent structures is the only way" claim; a
+batch/lane-parallel (multi-message) gene, the one axis that could plausibly beat the
+reference and hasn't been tried.

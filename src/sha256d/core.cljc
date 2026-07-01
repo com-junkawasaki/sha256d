@@ -109,23 +109,53 @@
                              (w (- t 16))))
              (inc t)))))
 
+(defn extend-schedule-transient
+  "Same 64-word schedule as `extend-schedule`, but grown in a transient vector with one
+  `persistent!` at the end, to cut the per-step persistent-vector allocation `conj` does.
+  Portable: transient vectors support indexed reads (`nth`) on both Clojure and
+  ClojureScript, and the result is made persistent before `run-rounds` ever reads it."
+  [w16]
+  (loop [w (transient (vec w16)) t 16]
+    (if (= t 64)
+      (persistent! w)
+      (recur (conj! w (add32 (small-sigma1 (nth w (- t 2)))
+                             (nth w (- t 7))
+                             (small-sigma0 (nth w (- t 15)))
+                             (nth w (- t 16))))
+             (inc t)))))
+
 ;; --- compression -------------------------------------------------------------------
+
+(defn- run-rounds
+  "The 64-round compression, given 8-word `state` and a fully-materialized, indexable
+  message schedule `w` (a vector, so `(w t)` reads W[t]). Shared by `compress` and
+  `compress-transient`; only how `w` is built differs between them."
+  [[h0 h1 h2 h3 h4 h5 h6 h7] w ch-fn maj-fn]
+  (loop [a h0 b h1 c h2 d h3 e h4 f h5 g h6 h h7 t 0]
+    (if (= t 64)
+      [(add32 h0 a) (add32 h1 b) (add32 h2 c) (add32 h3 d)
+       (add32 h4 e) (add32 h5 f) (add32 h6 g) (add32 h7 h)]
+      (let [t1 (add32 h (big-sigma1 e) (ch-fn e f g) (K t) (w t))
+            t2 (add32 (big-sigma0 a) (maj-fn a b c))]
+        (recur (add32 t1 t2) a b c (add32 d t1) e f g (inc t))))))
 
 (defn compress
   "One compression round over a 64-byte `block`, folding it into 8-word `state`.
   `ch-fn`/`maj-fn` default to this namespace's reference `ch`/`maj` -- pass alternative,
   proven-equivalent formulations (see sha256d.ops) to benchmark them through the exact
-  same padding/schedule/compression pipeline."
+  same padding/schedule/compression pipeline. Schedule built via `extend-schedule`."
   ([state block] (compress state block ch maj))
-  ([[h0 h1 h2 h3 h4 h5 h6 h7] block ch-fn maj-fn]
-   (let [w (extend-schedule (block->words block))]
-     (loop [a h0 b h1 c h2 d h3 e h4 f h5 g h6 h h7 t 0]
-       (if (= t 64)
-         [(add32 h0 a) (add32 h1 b) (add32 h2 c) (add32 h3 d)
-          (add32 h4 e) (add32 h5 f) (add32 h6 g) (add32 h7 h)]
-         (let [t1 (add32 h (big-sigma1 e) (ch-fn e f g) (K t) (w t))
-               t2 (add32 (big-sigma0 a) (maj-fn a b c))]
-           (recur (add32 t1 t2) a b c (add32 d t1) e f g (inc t))))))))
+  ([state block ch-fn maj-fn]
+   (run-rounds state (extend-schedule (block->words block)) ch-fn maj-fn)))
+
+(defn compress-transient
+  "Same result as `compress`, but builds the message schedule with `extend-schedule-
+  transient` (transient vector) to test whether cutting the schedule-build allocation is
+  a measurable, portable win over `compress`'s persistent-`conj` build (round 5). Same
+  `run-rounds` compression body; only the schedule construction differs."
+  ([state block] (compress-transient state block ch maj))
+  ([state block ch-fn maj-fn]
+   (run-rounds state (extend-schedule-transient (block->words block)) ch-fn maj-fn)))
 
 (defn compress-rolling
   "Same result as `compress`, but computes the message schedule in a 16-word rolling

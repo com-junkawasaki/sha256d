@@ -27,11 +27,13 @@
                            [_ maj-fn] (:maj ops/gene-pool)
                            [_ compress-fn] (:schedule ops/gene-pool)]
                        (core/sha256-bytes-with compress-fn msg ch-fn maj-fn)))))
-    (check "compress-rolling matches reference across many sizes"
+    (check "alternate schedule strategies (rolling, transient) match reference across sizes"
            (every? (fn [n]
-                     (let [msg (vec (map #(mod (* 37 (inc %)) 256) (range n)))]
-                       (= (core/sha256-bytes msg)
-                          (core/sha256-bytes-with core/compress-rolling msg core/ch core/maj))))
+                     (let [msg (vec (map #(mod (* 37 (inc %)) 256) (range n)))
+                           ref (core/sha256-bytes msg)]
+                       (and (= ref (core/sha256-bytes-with core/compress-rolling msg core/ch core/maj))
+                            ;; also exercises transient-vector nth reads under cljs
+                            (= ref (core/sha256-bytes-with core/compress-transient msg core/ch core/maj)))))
                    (range 0 130)))
     (check "midstate header-hash matches no-caching reference (20 random headers)"
            (every? (fn [_]

@@ -74,4 +74,6 @@
   fns (fn [state block ch-fn maj-fn]) selecting the message-schedule strategy."
   {:ch       {:naive ch-naive :alt ch-alt :or ch-or}
    :maj      {:naive maj-naive :alt maj-alt :or maj-or}
-   :schedule {:precompute core/compress :rolling core/compress-rolling}})
+   :schedule {:precompute core/compress
+              :rolling    core/compress-rolling
+              :precompute-transient core/compress-transient}})

@@ -112,15 +112,24 @@ honest across rounds:
   simply stopped being benchmarked); with `naive` kept in the field it actually wins one
   run. Honest verdict: at this payload/budget the Ch/Maj *formula* choice is within noise.
 - **Round 4** (first implementation-strategy gene): added `:schedule`
-  (`compress` precompute vs `compress-rolling` 16-word window). This produced the first
-  signal clearly above the noise floor — but a **negative** one: `:rolling` is
-  consistently ~7-10% *slower* on the JVM and always ranks last. The C-level
-  "schedule-buffer reuse" win doesn't transfer to idiomatic persistent-vector Clojure
-  (window-sliding via `conj`/`subvec` allocates more than the flat precompute vector
-  saves). The takeaway confirms round 3: for this workload the lever is
-  allocation/implementation strategy, not bit-level formula — and the genuine wins are
-  structural (`sha256d.midstate`'s ~2x fewer rounds per mining nonce), already in the repo.
+  (`compress` precompute vs `compress-rolling` 16-word window). First signal clearly above
+  the noise floor — but **negative**: `:rolling` is consistently ~7-10% *slower* on the
+  JVM and always ranks last. The C-level "schedule-buffer reuse" win doesn't transfer to
+  idiomatic persistent-vector Clojure (window-sliding via `conj`/`subvec` allocates).
+- **Round 5** (tested round 4's causal claim): added `:precompute-transient`
+  (`compress-transient`, schedule built in a transient vector) to test whether *cutting
+  allocation* is the lever. It isn't — transient precompute is within noise of (sometimes
+  worse than) plain precompute and never wins; plain `:precompute` takes every champion
+  slot. So the reference schedule build is already near-optimal in portable Clojure;
+  rolling's penalty is its specific `subvec`+`conj`+interleaving, not "allocation" broadly.
 
-Open follow-ups: benchmarking the tournament under node (correctness there is proven,
-speed is not — V8 allocation differs); a deliberately non-`.cljc`, mutable-`int-array`
-JVM-only rolling schedule (the form that actually wins in C); batch/lane-parallel hashing.
+**Net (rounds 1-5):** zero portable speedups found — every Ch/Maj formula is within noise,
+both schedule alternatives are ties-or-losses. The honest result is that *the reference is
+already at the portable-Clojure efficient frontier for a single-stream hash*; the only real
+levers are structural (`sha256d.midstate`, already in the repo) or require leaving `.cljc`
+(mutable buffers, SIMD/lane parallelism). The harness earned its keep by **rejecting** three
+plausible "optimizations" that don't survive a convergence-sound tournament.
+
+Open follow-ups: benchmarking under node (V8 allocation differs — ranks may change); a
+deliberately non-`.cljc` mutable-`int-array` JVM schedule; a batch/lane-parallel
+(multi-message) gene — the one axis that could plausibly beat the reference, untried.
