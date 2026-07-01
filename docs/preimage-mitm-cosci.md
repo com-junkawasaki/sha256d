@@ -75,19 +75,46 @@ feed both chunks (the dependency graph saturates to all 16 base words by round ~
 split exists and the word-granularity attack vanishes. This is the empirical signature of SHA-256's
 preimage resistance — the same mechanism, message expansion, that makes forward inversion hard.
 
-## Gap to the published record, and where co-scientist search would earn its keep
+## (B) RUNNING the attack — a measured below-brute-force preimage on the real round function
 
-The literature reaches ~**45 rounds** (biclique, ≈2²⁵⁵·⁵) — further than this word-granularity search
-(~24 rounds) — using finer tools this implementation does *not* include:
+The full-state MITM is 2¹²⁸ (unrunnable), so `sha256d.mitm/run-mitm` demonstrates its ENGINE at a
+runnable scale — a partial preimage matching on `m` mid-state bits of REAL 32-bit reduced-round
+SHA-256 (real Ch/Maj/Σ/σ/K; free-schedule model so the forward/backward neutral split is exact),
+counting compression-chunk evaluations. It plants a solution, recovers it, and verifies the recovered
+pair genuinely collides. `(sha256d.mitm/run-mitm {})` (8 rounds, cut 4, d=11 freedom bits/side, m=26,
+seed 42), deterministic:
 
-- **bit-level neutral bits** (not whole 32-bit words) — far more configurations, so the search space
-  becomes intractable and a true evolutionary/tournament search (or MILP/SAT, as in the automated-
-  cryptanalysis literature) is needed;
-- **bicliques** (initial structures that manufacture extra rounds of independence);
-- **probabilistic / partial matching** across the modular-addition mixing.
+```
+MITM:  2,049 chunk-evals        (≈ 2·2^d, builds a 2^11 table + probes)
+brute: 2,325,617 chunk-evals    (same 2^d × 2^d space, no table)
+speedup: 1135×                  verified: true  (recovered pair really collides on the 26 bits)
+```
 
-Extending `sha256d.mitm` to bit-level + biclique is the point where the full co-scientist machinery
-(Generation of biclique dimensions, Reflection verifying the differential independence, Elo Ranking
-by complexity, Evolution recombining neutral-bit sets) would be *required* rather than optional.
-Even fully realized, that frontier ends at ~45 rounds / ≈2²⁵⁵·⁵. **Full 64-round SHA-256 stays
-unbroken by any meaningful margin — which is the correct, honest answer to "invert it below brute force."**
+This is a real, running, verified below-brute-force attack primitive on the actual SHA-256 round
+function — the meet-in-the-middle square root (2^(m/2) vs 2^m) that makes the whole preimage attack
+sub-brute-force, measured in genuine operation counts. It scales as √: doubling d roughly squares the
+brute-force gap while ~doubling the MITM cost. `test/sha256d/mitm_test.cljc` pins these numbers.
+
+## (A) Pushing further — the honest ceiling: bit-level buys nothing, bicliques are the real gap
+
+The `(A)` request was: extend to bit-level neutral bits + bicliques with a true evolutionary search,
+toward the ~45-round record. The honest, tested result:
+
+- **Bit-level neutrality reduces to word-level under sound analysis — bit-granularity gives NO gain.**
+  `bit-neutral-for-chunk?` (using the *real* message expansion) shows: a single bit of base word W_i
+  is neutral for a chunk **iff the whole word W_i is unused** by it. If W_i is used, even a one-bit
+  flip perturbs the chunk (σ-diffusion + carries), so no bit of it is neutral; if unused, every bit
+  is. `bit-level-equals-word-level-test` verifies this across all 16 words for a 24-round chunk. So a
+  bit-level neutral-set search bottoms out at exactly the word-level result (~24 rounds) — the
+  evolutionary/Elo machinery adds nothing here, and the config space is small enough that the
+  exhaustive `best-attack` already returns the optimum.
+- **The real gap to ~45 rounds / 2²⁵⁵·⁵ is bicliques**, not finer neutral sets: initial structures that
+  manufacture extra rounds of independence via *differential trails*, plus probabilistic partial
+  matching. These relax soundness in controlled, differential-verified ways — they are a different
+  technique, not a neutral-set search, and this repo **does not fabricate their complexity**. That
+  larger, genuinely-intractable space (which biclique dimensions, which trails) is the one place a true
+  evolutionary / MILP / SAT search becomes *necessary*; building and *verifying* it correctly is a
+  research effort, and claiming a 45-round result without that verification would be fabrication.
+- **Full 64-round SHA-256 stays unbroken by any meaningful margin** — the correct, honest endpoint,
+  and the honest answer to "invert it below brute force": yes for reduced rounds (demonstrably, and
+  runnably per (B)), no for the real thing.

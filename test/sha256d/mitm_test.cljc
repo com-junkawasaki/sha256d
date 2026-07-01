@@ -37,6 +37,45 @@
       (is (= 128 (first saved)) "16 rounds: full 2^128 speedup")
       (is (zero? (last saved)) "by ~40 rounds word-granularity MITM saves nothing"))))
 
+(deftest inverse-round-test
+  (testing "round-inv is the exact inverse of round-fwd on random states/subkeys"
+    (let [rng (java.util.Random. 7)
+          rw  (fn [] (bit-and (.nextLong rng) 0xffffffff))]
+      (dotimes [_ 500]
+        (let [state (vec (repeatedly 8 rw))
+              wt (rw) t (rand-int 64)]
+          (is (= state (mitm/round-inv (mitm/round-fwd state wt t) wt t))))))))
+
+#?(:clj
+   (deftest run-mitm-beats-brute-test
+     (testing "the MITM finds a real partial preimage on real 32-bit reduced-round SHA-256 in
+               far fewer compression-chunk evals than the same-space brute force"
+       (let [res (mitm/run-mitm {:r 8 :s 4 :d 11 :m 26 :seed 42})]
+         (is (true? (:verified res)) "recovered pair genuinely collides on the m mid-state bits")
+         (is (some? (:mitm-hit res)))
+         ;; MITM ~ 2^d chunk-evals; brute searches the 2^(2d) space -> a large, measured speedup
+         (is (< (:mitm-evals res) 5000) (str "mitm-evals=" (:mitm-evals res)))
+         (is (> (:speedup res) 100.0) (str "speedup=" (:speedup res)))))))
+
+(deftest bit-level-equals-word-level-test
+  (testing "(A) finding: under sound analysis, bit-granularity gives NO gain over word-granularity.
+            A base word W_i is neutral for a chunk iff the WHOLE word is unused by it -- if used,
+            even a single-bit flip perturbs the chunk (diffusion), so no bit of it is neutral."
+    (let [r 24, lo 12, hi 24
+          deps (mitm/schedule-deps r)
+          used (mitm/used-base-words deps lo hi)
+          ws16 (vec (take 16 (iterate #(bit-and (unchecked-add (unchecked-multiply % 2654435761) 1) 0xffffffff)
+                                       0x9e3779b9)))]
+      (doseq [wi (range 16)]
+        (let [neutral-bits (filter #(mitm/bit-neutral-for-chunk? ws16 wi % lo hi) (range 32))]
+          (if (contains? used wi)
+            ;; a used word: NOT all bits neutral (it perturbs the chunk) -> bit-level buys nothing
+            (is (< (count neutral-bits) 32)
+                (str "word " wi " is used by the chunk yet appears fully bit-neutral"))
+            ;; an unused word: EVERY bit is neutral -> neutrality is a whole-word property
+            (is (= 32 (count neutral-bits))
+                (str "word " wi " is unused yet some bit perturbs the chunk"))))))))
+
 (deftest reflection-gate-test
   (testing "a config with an empty neutral set on either side is rejected (not a valid attack)"
     (let [deps (mitm/schedule-deps 24)

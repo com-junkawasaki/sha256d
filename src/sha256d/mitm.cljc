@@ -18,7 +18,8 @@
   The core object is the message-schedule dependency graph: which of the 16 free base words
   W0..W15 each expanded word W_t (t>=16) transitively depends on, via
   W_t = sigma1(W_{t-2}) + W_{t-7} + sigma0(W_{t-15}) + W_{t-16}."
-  (:require [clojure.set :as set]))
+  (:require [clojure.set :as set]
+            [sha256d.core :as core]))
 
 (def n-bits 256)   ; digest / internal-state size
 (def word-bits 32)
@@ -107,5 +108,139 @@
               (str "| " rounds " | (none) | 0 | - | NO |\n")
               (str "| " rounds " | 2^" pseudo-log2 " | " saved-bits " | " n1 "/" n2 " | "
                    (if (< pseudo-log2 n-bits) "yes" "NO") " |\n")))))))
+
+;; ---------------------------------------------------------------------------------------
+;; (B) RUN the attack: a measured MITM that finds a partial preimage on REAL 32-bit reduced-
+;; round SHA-256 in far fewer compression-calls than brute force. The full-state MITM is 2^128
+;; (unrunnable), so we demonstrate its ENGINE at a runnable scale: match on m mid-state bits.
+;; This is the exact square-root that makes the whole preimage attack sub-brute-force, on the
+;; real round function (real Ch/Maj/Sigma/K), not a toy cipher. We use the free-schedule
+;; (independent per-round subkeys) model so the forward/backward neutral split is exact.
+
+(defn sub32 [x y] (bit-and (- x y) 0xffffffff))
+
+(defn round-fwd
+  "One forward SHA-256 round with subkey `wt` at round index `t` (for constant K_t)."
+  [[a b c d e f g h] wt t]
+  (let [t1 (core/add32 h (core/big-sigma1 e) (core/ch e f g) (core/K t) wt)
+        t2 (core/add32 (core/big-sigma0 a) (core/maj a b c))]
+    [(core/add32 t1 t2) a b c (core/add32 d t1) e f g]))
+
+(defn round-inv
+  "Inverse of `round-fwd`: given the post-round state and `wt`, recover the pre-round state.
+  Verified as the exact inverse in the tests."
+  [[a' b' c' d' e' f' g' h'] wt t]
+  (let [a b', b c', c d', e f', f g', g h'
+        t2 (core/add32 (core/big-sigma0 a) (core/maj a b c))
+        t1 (sub32 a' t2)
+        d  (sub32 e' t1)
+        h  (sub32 (sub32 (sub32 (sub32 t1 (core/big-sigma1 e)) (core/ch e f g)) (core/K t)) wt)]
+    [a b c d e f g h]))
+
+(defn chunk-fwd [state ws lo hi] (reduce (fn [s t] (round-fwd s (ws t) t)) state (range lo hi)))
+(defn chunk-bwd [state ws lo hi] (reduce (fn [s t] (round-inv s (ws t) t)) state (reverse (range lo hi))))
+
+(defn- state->low-bits
+  "An m-bit projection of the mid-state for partial matching: the low m bits (m<=32, i.e. the
+  runnable scale) of word `a` -- the freshly-computed, fully-diffused word most sensitive to the
+  free forward/backward knobs. A single-word projection is a valid m-bit match; match probability
+  is 2^-m regardless of which m bits are used."
+  [state m]
+  (bit-and (nth state 0) (dec (bit-shift-left 1 m))))
+
+#?(:clj
+   (defn run-mitm
+     "Run a partial-preimage MITM on `r`-round free-schedule 32-bit SHA-256, cut at round `s`.
+     `d` bits of freedom on each side (round-0 subkey forward, round-(r-1) subkey backward),
+     matching on `m` mid-state bits. A collision is planted (so success is guaranteed) then
+     recovered; we count compression-chunk evaluations for MITM vs the same-space brute force
+     and verify the recovered pair really collides on the m bits. Returns a result map."
+     [{:keys [r s d m seed] :or {r 8 s 4 d 11 m 26 seed 42}}]
+     (let [rng   (java.util.Random. seed)
+           rw    (fn [] (bit-and (.nextLong rng) 0xffffffff))
+           fixed (mapv (fn [_] (rw)) (range r))         ; baseline subkeys for rounds 1..r-2 used as-is
+           mask  (dec (bit-shift-left 1 d))
+           hi0   (bit-and (rw) (bit-not mask))          ; fixed high bits of the two free subkeys
+           hiL   (bit-and (rw) (bit-not mask))
+           ;; plant a true solution: free low-d bits chosen in-range
+           w0*   (bit-or hi0 (bit-and (rw) mask))
+           wL*   (bit-or hiL (bit-and (rw) mask))
+           ws*   (-> fixed (assoc 0 w0*) (assoc (dec r) wL*))
+           target (chunk-fwd core/H0 ws* 0 r)           ; full r-round output of the planted solution
+           evals (atom 0)
+           w0-of (fn [low] (bit-or hi0 low))
+           wL-of (fn [low] (bit-or hiL low))
+           ;; MITM: build forward table over 2^d, probe with 2^d backward
+           table (persistent!
+                   (reduce (fn [t low]
+                             (swap! evals inc)
+                             (let [mid (chunk-fwd core/H0 (assoc fixed 0 (w0-of low)) 0 s)]
+                               (assoc! t (state->low-bits mid m) low)))
+                           (transient {}) (range (inc mask))))
+           mitm-hit (loop [low 0]
+                      (if (> low mask)
+                        nil
+                        (do (swap! evals inc)
+                            (let [mid (chunk-bwd target (assoc fixed (dec r) (wL-of low)) s r)
+                                  k   (state->low-bits mid m)]
+                              (if-let [w0low (get table k)]
+                                [(w0-of w0low) (wL-of low)]
+                                (recur (inc low)))))))
+           mitm-evals @evals
+           ;; brute force over the same 2^d x 2^d space, recomputing both chunks per pair
+           bevals (atom 0)
+           brute-hit (loop [i 0]
+                       (if (> i mask)
+                         nil
+                         (let [midF (do (swap! bevals inc) (chunk-fwd core/H0 (assoc fixed 0 (w0-of i)) 0 s))
+                               kF   (state->low-bits midF m)
+                               found (loop [j 0]
+                                       (if (> j mask) nil
+                                           (let [midB (do (swap! bevals inc) (chunk-bwd target (assoc fixed (dec r) (wL-of j)) s r))]
+                                             (if (= kF (state->low-bits midB m)) [(w0-of i) (wL-of j)] (recur (inc j))))))]
+                           (or found (recur (inc i))))))]
+       {:r r :s s :d d :m m
+        :mitm-evals mitm-evals
+        :brute-evals @bevals
+        :speedup (double (/ @bevals (max 1 mitm-evals)))
+        :mitm-hit mitm-hit
+        ;; verify: the recovered pair genuinely collides on the m mid-state bits
+        :verified (when mitm-hit
+                    (let [[w0 wL] mitm-hit
+                          midF (chunk-fwd core/H0 (assoc fixed 0 w0) 0 s)
+                          midB (chunk-bwd target (assoc fixed (dec r) wL) s r)]
+                      (= (state->low-bits midF m) (state->low-bits midB m))))})))
+
+;; ---------------------------------------------------------------------------------------
+;; (A) Pushing past word granularity: bit-level neutral bits + bicliques + evolutionary search.
+;; The honest finding, backed by the demonstrator below: under SOUND analysis, a bit-level
+;; search gives NO gain over the word-level one -- a single bit of base word W_i is neutral for
+;; a chunk iff the *whole* word W_i is unused by that chunk (used-base-words). Diffusion +
+;; message expansion mean any bit of a used word perturbs the chunk. So the co-scientist
+;; tournament over neutral SETS bottoms out at word granularity (~24 rounds); the config space
+;; is small enough that the exhaustive `best-attack` already returns the optimum, so the
+;; evolutionary/Elo machinery is not yet *needed* here.
+;;
+;; The real gap to the published ~45-round / 2^255.5 record is BICLIQUES (initial structures
+;; that manufacture extra rounds of independence via differential trails) + probabilistic
+;; partial matching. Those relax soundness in controlled, differential-verified ways -- they are
+;; not a neutral-set search, and this repo does not fabricate their complexity. That larger,
+;; genuinely-intractable space (which biclique dimensions, which trails) is where a true
+;; evolutionary / MILP / SAT search becomes necessary rather than optional.
+
+(defn used-base-words
+  "The base message words {0..15} used by rounds [lo, hi) of R-round SHA-256, via the schedule DAG."
+  [deps lo hi]
+  (reduce into #{} (map deps (range lo hi))))
+
+(defn bit-neutral-for-chunk?
+  "SOUND test: does flipping bit `j` of base word `wi` leave the chunk [lo,hi)'s transform
+  unchanged? (true = that bit is neutral for the chunk.) Uses the REAL message expansion, so it
+  captures diffusion through the sigma-mixing exactly."
+  [ws16 wi j lo hi]
+  (let [in  (vec (repeat 8 0x12345678))
+        w1  (core/extend-schedule (vec ws16))
+        w2  (core/extend-schedule (assoc (vec ws16) wi (bit-xor (nth ws16 wi) (bit-shift-left 1 j))))]
+    (= (chunk-fwd in w1 lo hi) (chunk-fwd in w2 lo hi))))
 
 (defn -main [& _] (println (report)))
