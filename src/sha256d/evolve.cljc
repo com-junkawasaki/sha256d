@@ -9,10 +9,11 @@
   AlphaEvolve's search -- it's simply not SHA-256. Reflection below is therefore a
   hard pass/fail filter applied before any benchmarking, never one term in a score.
 
-  As sha256d.ops grows more genes (loop-unrolling degree, schedule-buffer reuse,
-  batch/lane-parallel hashing, ...) this search space grows with it; today it's still
-  small (2 primitives x 3 variants each = 9 candidates) and mostly demonstrates the
-  shape of the loop rather than a big discovery.
+  As sha256d.ops grows more genes this search space grows with it; as of round 4 it's
+  3 genes -- :ch (3) x :maj (3) x :schedule (2) = 18 candidates -- the :schedule gene
+  being the first implementation-strategy (not per-bit-formula) axis, the frontier
+  round 3 argued actually matters. Further genes (loop-unrolling degree, batch/lane-
+  parallel hashing, ...) would extend it the same way.
 
   Two design choices (added round 3, see docs/evolution-log.md) make the generations
   actually accumulate evidence rather than just re-measure: (1) Evolution keeps the
@@ -60,8 +61,10 @@
   on every reflection message. Candidates failing this are disqualified outright, not
   merely down-scored -- ranking below never sees them."
   [pool candidate]
-  (let [{:keys [ch maj]} (candidate->fns pool candidate)]
-    (every? #(= (core/sha256-bytes %) (core/sha256-bytes % ch maj)) reflection-messages)))
+  (let [{:keys [ch maj schedule]} (candidate->fns pool candidate)]
+    (every? #(= (core/sha256-bytes %)
+                (core/sha256-bytes-with (or schedule core/compress) % ch maj))
+            reflection-messages)))
 
 ;; --- Ranking: pairwise benchmark tournament with Elo-style updates -----------------
 
@@ -99,9 +102,11 @@
   ([pool candidates payload bench-opts] (rank pool candidates payload bench-opts {}))
   ([pool candidates payload bench-opts prior-ratings]
    (let [timed (mapv (fn [c]
-                       (let [{:keys [ch maj]} (candidate->fns pool c)]
+                       (let [{:keys [ch maj schedule]} (candidate->fns pool c)]
                          {:candidate c
-                          :ns-per-hash (bench-ns-per-hash #(core/sha256-bytes % ch maj) payload bench-opts)}))
+                          :ns-per-hash (bench-ns-per-hash
+                                        #(core/sha256-bytes-with (or schedule core/compress) % ch maj)
+                                        payload bench-opts)}))
                      candidates)
          n (count timed)
          ratings (atom (mapv #(get prior-ratings (:candidate %) 1000.0) timed))]

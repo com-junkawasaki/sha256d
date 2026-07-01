@@ -5,7 +5,15 @@
   proven algebraically below and re-checked exhaustively in test/sha256d/ops_test.cljc
   (all 2^3 single-bit patterns, plus randomized 32-bit words) -- only the operation
   sequence differs, never the result. That correctness gate is non-negotiable; only
-  variants that pass it are eligible for sha256d.evolve's benchmark tournament.")
+  variants that pass it are eligible for sha256d.evolve's benchmark tournament.
+
+  As of round 4 the pool also carries a `:schedule` gene -- an implementation-strategy
+  dimension rather than a per-bit formula -- selecting the message-schedule strategy
+  (`sha256d.core/compress` full-precompute vs `compress-rolling` 16-word window). This
+  is the 'schedule-buffer reuse' axis round 3 flagged as the real efficiency frontier;
+  its variants are whole compression fns, not (fn [x y z]) primitives, and both are
+  held to the same bit-identical correctness gate."
+  (:require [sha256d.core :as core]))
 
 ;; --- Ch(x,y,z) = (x&y) ^ (~x&z) -----------------------------------------------------
 
@@ -61,6 +69,9 @@
   (bit-or (bit-and x y) (bit-and x z) (bit-and y z)))
 
 (def gene-pool
-  "Named variants per primitive, keyed for sha256d.evolve's candidate generation."
-  {:ch  {:naive ch-naive :alt ch-alt :or ch-or}
-   :maj {:naive maj-naive :alt maj-alt :or maj-or}})
+  "Named variants per gene, keyed for sha256d.evolve's candidate generation. `:ch`/`:maj`
+  variants are (fn [x y z]) round primitives; `:schedule` variants are whole compression
+  fns (fn [state block ch-fn maj-fn]) selecting the message-schedule strategy."
+  {:ch       {:naive ch-naive :alt ch-alt :or ch-or}
+   :maj      {:naive maj-naive :alt maj-alt :or maj-or}
+   :schedule {:precompute core/compress :rolling core/compress-rolling}})

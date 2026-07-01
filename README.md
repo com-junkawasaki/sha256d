@@ -37,13 +37,17 @@ completely different order than round-primitive rewrites -- see
 - **`sha256d.core`** -- FIPS 180-4 SHA-256 + Bitcoin's SHA-256d (`sha256(sha256(x))`),
   over plain sequences of byte values (ints 0-255), no host byte-array type in the hot
   path. This is the correctness oracle everything else in the repo is checked against.
-- **`sha256d.ops`** -- the "gene pool", currently 3 variants each for Ch and Maj
-  (9 candidates): `*-naive` (FIPS textbook), `*-alt` (the OpenSSL/Bitcoin Core
-  one-fewer-gate formulation), and `*-or` (the same pairwise terms as `*-naive`, OR'd
-  instead of XOR'd -- valid because those terms are pairwise-disjoint/never-exactly-
-  two-1). Each proven algebraically equivalent to the FIPS textbook form in a
-  doc-comment and re-checked exhaustively (all single-bit truth-table rows + randomized
-  32-bit words) in `test/sha256d/ops_test.cljc`.
+  Two message-schedule strategies (`compress` = full 64-word precompute, `compress-rolling`
+  = 16-word just-in-time window), both bit-identical, injectable via `sha256-bytes-with`.
+- **`sha256d.ops`** -- the "gene pool", now `:ch (3) x :maj (3) x :schedule (2) = 18`
+  candidates. The Ch/Maj variants are `*-naive` (FIPS textbook), `*-alt` (the
+  OpenSSL/Bitcoin Core one-fewer-gate formulation), and `*-or` (the same pairwise terms
+  as `*-naive`, OR'd instead of XOR'd -- valid because those terms are pairwise-disjoint
+  / never-exactly-two-1), each proven algebraically equivalent to the FIPS textbook form
+  in a doc-comment and re-checked exhaustively (all single-bit truth-table rows +
+  randomized 32-bit words) in `test/sha256d/ops_test.cljc`. The `:schedule` gene is an
+  implementation-strategy axis rather than a per-bit formula (`compress` vs
+  `compress-rolling`).
 - **`sha256d.midstate`** -- Bitcoin block-header mining's classic optimization: cache
   the compression state after a header's constant first 64 bytes so each nonce attempt
   only re-runs the second block's 64 rounds, not the whole 80-byte header.
@@ -107,9 +111,16 @@ honest across rounds:
   "elimination" was largely an artifact of the diversity-loss bug (a dropped candidate
   simply stopped being benchmarked); with `naive` kept in the field it actually wins one
   run. Honest verdict: at this payload/budget the Ch/Maj *formula* choice is within noise.
-  The real efficiency frontier is structural (the `sha256d.midstate` ~2x win, and genes
-  not yet in the pool), not the round-primitive rewrite.
+- **Round 4** (first implementation-strategy gene): added `:schedule`
+  (`compress` precompute vs `compress-rolling` 16-word window). This produced the first
+  signal clearly above the noise floor — but a **negative** one: `:rolling` is
+  consistently ~7-10% *slower* on the JVM and always ranks last. The C-level
+  "schedule-buffer reuse" win doesn't transfer to idiomatic persistent-vector Clojure
+  (window-sliding via `conj`/`subvec` allocates more than the flat precompute vector
+  saves). The takeaway confirms round 3: for this workload the lever is
+  allocation/implementation strategy, not bit-level formula — and the genuine wins are
+  structural (`sha256d.midstate`'s ~2x fewer rounds per mining nonce), already in the repo.
 
-Open follow-ups: running the tournament under node (not just the JVM); a payload where the
-primitive is a larger fraction of total work; and genes beyond Ch/Maj (loop-unrolling
-degree, schedule-buffer reuse, batch/lane-parallel hashing).
+Open follow-ups: benchmarking the tournament under node (correctness there is proven,
+speed is not — V8 allocation differs); a deliberately non-`.cljc`, mutable-`int-array`
+JVM-only rolling schedule (the form that actually wins in C); batch/lane-parallel hashing.

@@ -8,12 +8,17 @@
   (reduce * (map (comp count val) pool)))
 
 (deftest generate-candidates-test
-  (testing "every combination of the default gene pool, size derived from the pool itself
-            so this test doesn't need editing every time a gene/variant is added"
-    (is (= (expected-candidate-count ops/gene-pool) (count (evolve/generate-candidates))))
-    (is (= (set (for [ch-k (keys (:ch ops/gene-pool)) maj-k (keys (:maj ops/gene-pool))]
-                  {:ch ch-k :maj maj-k}))
-           (set (evolve/generate-candidates))))))
+  (testing "generate-candidates yields exactly the full cartesian product of the pool --
+            characterized gene-generically so this test needs no edit when genes are added"
+    (let [cands (evolve/generate-candidates)]
+      ;; right count (product of per-gene variant counts) and all distinct => a bijection
+      ;; with the cartesian product, given the two coverage checks below
+      (is (= (expected-candidate-count ops/gene-pool) (count cands)))
+      (is (apply distinct? cands))
+      ;; every candidate assigns every gene...
+      (is (every? #(= (set (keys ops/gene-pool)) (set (keys %))) cands))
+      ;; ...to a variant that actually exists in the pool
+      (is (every? (fn [c] (every? (fn [[g v]] (contains? (get ops/gene-pool g) v)) c)) cands)))))
 
 (deftest reflect-test
   (testing "every real gene-pool candidate passes the correctness gate"

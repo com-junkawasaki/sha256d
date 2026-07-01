@@ -19,12 +19,20 @@
            (= "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"
               (core/bytes->hex
                (core/sha256-bytes (core/str->bytes "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")))))
-    (check "gene-pool ch-alt/maj-alt match reference on a sample message"
+    (check "every gene-pool combination (ch x maj x schedule) matches reference"
            (let [msg (core/str->bytes "the quick brown fox jumps over the lazy dog")
                  reference (core/sha256-bytes msg)]
              (every? #(= reference %)
-                     (for [[_ ch-fn] (:ch ops/gene-pool) [_ maj-fn] (:maj ops/gene-pool)]
-                       (core/sha256-bytes msg ch-fn maj-fn)))))
+                     (for [[_ ch-fn] (:ch ops/gene-pool)
+                           [_ maj-fn] (:maj ops/gene-pool)
+                           [_ compress-fn] (:schedule ops/gene-pool)]
+                       (core/sha256-bytes-with compress-fn msg ch-fn maj-fn)))))
+    (check "compress-rolling matches reference across many sizes"
+           (every? (fn [n]
+                     (let [msg (vec (map #(mod (* 37 (inc %)) 256) (range n)))]
+                       (= (core/sha256-bytes msg)
+                          (core/sha256-bytes-with core/compress-rolling msg core/ch core/maj))))
+                   (range 0 130)))
     (check "midstate header-hash matches no-caching reference (20 random headers)"
            (every? (fn [_]
                      (let [header (vec (repeatedly ms/header-length-bytes #(rand-int 256)))]

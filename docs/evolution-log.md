@@ -146,3 +146,68 @@ branches compile but the loop has still only been *run* on the JVM); a payload/'
 where the primitive is a bigger fraction of total work, to actually resolve alt-vs-or if
 it's resolvable at all; genes beyond Ch/Maj (loop-unrolling degree, schedule-buffer
 reuse, batch/lane-parallel hashing) — the real efficiency frontier, per round 1 finding 1.
+
+## 2026-07-01 (round 4) — added a real implementation-strategy gene; got the first signal that clears the noise
+
+Acting on round 3's conclusion (the efficiency frontier is *structural*, not the
+round-primitive formula), added the first non-formula gene: `:schedule`, selecting the
+message-schedule strategy.
+
+- `sha256d.core/compress-rolling`: computes the 64-word schedule in a 16-word rolling
+  window just-in-time inside the round loop, instead of `compress`'s full-precompute
+  `extend-schedule` — the "schedule-buffer reuse" idea. Proven bit-identical to the
+  reference across 260 input sizes + FIPS vectors (`compress-rolling-equivalence-test`)
+  and under cljs.
+- Pool is now `:ch (3) x :maj (3) x :schedule (2) = 18` candidates; `rank`/`reflect`
+  route through the new injectable `sha256-bytes-with`. `clojure -M:test` (17 tests,
+  5449 assertions) and the cljs proof (6/6) pass.
+
+Three runs (leaderboards trimmed to top + the surviving `:rolling` entry):
+
+```
+run 1: champion {:ch :or, :maj :or,    :schedule :precompute} 45948 ns/hash, elo 1222
+       ...(4 more :precompute, elo 1102-1196)...
+       LAST {:ch :or, :maj :or,  :schedule :rolling}  49351 ns/hash, elo 927
+run 2: champion {:ch :or, :maj :naive, :schedule :precompute} 46489 ns/hash, elo 1165
+       LAST {:ch :or, :maj :alt, :schedule :rolling}  50031 ns/hash, elo 946
+run 3: champion {:ch :or, :maj :naive, :schedule :precompute} 45325 ns/hash, elo 1170
+       LAST {:ch :or, :maj :alt, :schedule :rolling}  48946 ns/hash, elo 943
+```
+
+**Findings:**
+
+9. **First signal that clearly exceeds the noise floor — and it's a negative result about
+   the optimization I just added.** In all 3 runs `:schedule :precompute` wins and the
+   sole surviving `:rolling` candidate is *last*, in its own low-Elo cluster (~927-946,
+   well below the ~1100-1220 precompute pack), consistently ~7-10% slower in ns/hash
+   (~49-50k vs ~45-47k). Unlike Ch/Maj (rounds 1-3, all within ~3%/tolerance), this gap
+   is stable across runs and outside the proximity tolerance. The persistent-Elo spread
+   widened to ~295 points (vs round 3's ~120 on pure noise), i.e. the round-3 harness
+   correctly *amplifies* a real signal — good confirmation it now separates signal from
+   noise rather than manufacturing it.
+10. **Why: the C-level "schedule-buffer reuse" win does NOT transfer to idiomatic
+    persistent-vector Clojure.** In C, rolling uses an in-place 16-word `int[]` with zero
+    allocation, beating a 64-word buffer. Here, sliding the window with
+    `(conj (subvec win 1 16) wt)` allocates a new (sub)vector every one of the 48
+    extension steps per block — *more* churn than `extend-schedule`'s single flat 64-word
+    vector that the JIT indexes cheaply with `(w t)`. So the "optimization" is a
+    pessimization on this platform. A mutable `int-array` + `aset` rolling window would
+    likely win on the JVM (it's how OpenSSL does it) but breaks `.cljc` portability
+    (JVM/JS array semantics diverge) — deliberately not done; noted as a platform-specific
+    follow-up, not a portable gene.
+11. **Within `:precompute`, Ch/Maj is still noise** (consistent with round 3): `:ch :or`
+    happens to top all 3 runs but `:maj` alternates (`:or`/`:naive`/`:naive`) and the
+    intra-precompute gaps sit inside tolerance. Not claimed as a result.
+
+**Net so far:** three rounds of Ch/Maj formula search found nothing above noise; the first
+implementation-strategy gene immediately produced a clear (negative) signal. That is
+itself the headline — *for this workload the lever is allocation/implementation strategy,
+not bit-level formula* — and it re-confirms round 3's thesis. The genuine wins remain
+structural and already in the repo (`sha256d.midstate`'s ~2x fewer compression rounds per
+mining nonce), or would require a mutable-buffer, platform-specific (non-`.cljc`) rolling
+schedule that this repo's portability constraint rules out.
+
+**Still not done:** node/cljs *benchmarking* of the tournament (correctness under cljs is
+proven; speed there — where V8's allocation behavior differs and rolling might fare
+differently — is not measured); a mutable-array JVM-only schedule as a separate,
+explicitly-non-portable experiment; genes for batch/lane-parallel hashing.

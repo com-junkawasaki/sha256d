@@ -36,9 +36,11 @@
         (is (= (core/maj x y z) (ops/maj-alt x y z) (ops/maj-or x y z)))))))
 
 (deftest gene-pool-end-to-end-test
-  (testing "swapping any gene-pool variant into the full digest pipeline changes nothing"
+  (testing "every full combination of gene-pool variants -- ch x maj x schedule -- yields
+            the reference digest unchanged"
     (let [msg (core/str->bytes "the quick brown fox jumps over the lazy dog")
           reference (core/sha256-bytes msg)]
-      (doseq [[_ ch-fn] (:ch ops/gene-pool)
-              [_ maj-fn] (:maj ops/gene-pool)]
-        (is (= reference (core/sha256-bytes msg ch-fn maj-fn)))))))
+      (doseq [[_ ch-fn]       (:ch ops/gene-pool)
+              [_ maj-fn]      (:maj ops/gene-pool)
+              [_ compress-fn] (:schedule ops/gene-pool)]
+        (is (= reference (core/sha256-bytes-with compress-fn msg ch-fn maj-fn)))))))

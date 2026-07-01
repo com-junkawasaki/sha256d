@@ -127,15 +127,49 @@
                t2 (add32 (big-sigma0 a) (maj-fn a b c))]
            (recur (add32 t1 t2) a b c (add32 d t1) e f g (inc t))))))))
 
+(defn compress-rolling
+  "Same result as `compress`, but computes the message schedule in a 16-word rolling
+  window just-in-time inside the round loop instead of materializing the full 64-word
+  W vector first -- the 'schedule-buffer reuse' implementation strategy, which trades a
+  64-element allocation per block for a 16-element one. `win` holds the last 16 schedule
+  words [W(t-16)..W(t-1)] on entry to step t; for t<16 they are the block words, and for
+  t>=16 W(t)=σ1(W(t-2))+W(t-7)+σ0(W(t-15))+W(t-16) reads win[14]/win[9]/win[1]/win[0]
+  respectively, then the window slides. Held to the same hard correctness gate as the
+  reference (see test/sha256d/core_test.cljc and sha256d.evolve/reflect) -- if it ever
+  diverged from `compress` on any input it would be disqualified, not merely slower."
+  ([state block] (compress-rolling state block ch maj))
+  ([[h0 h1 h2 h3 h4 h5 h6 h7] block ch-fn maj-fn]
+   (let [bw (block->words block)]
+     (loop [a h0 b h1 c h2 d h3 e h4 f h5 g h6 h h7 win bw t 0]
+       (if (= t 64)
+         [(add32 h0 a) (add32 h1 b) (add32 h2 c) (add32 h3 d)
+          (add32 h4 e) (add32 h5 f) (add32 h6 g) (add32 h7 h)]
+         (let [wt   (if (< t 16)
+                      (nth bw t)
+                      (add32 (small-sigma1 (nth win 14)) (nth win 9)
+                             (small-sigma0 (nth win 1)) (nth win 0)))
+               t1   (add32 h (big-sigma1 e) (ch-fn e f g) (K t) wt)
+               t2   (add32 (big-sigma0 a) (maj-fn a b c))
+               win' (if (< t 16) win (conj (subvec win 1 16) wt))]
+           (recur (add32 t1 t2) a b c (add32 d t1) e f g win' (inc t))))))))
+
 ;; --- public digest API --------------------------------------------------------------
+
+(defn sha256-bytes-with
+  "SHA-256 with an injectable compression strategy (`compress` = precompute the full
+  message schedule, or `compress-rolling` = 16-word rolling window) alongside the
+  ch/maj seams. sha256d.evolve treats the schedule strategy as a third gene and
+  benchmarks it through this entry point; `sha256-bytes` below is just this with the
+  reference `compress`."
+  [compress-fn byte-seq ch-fn maj-fn]
+  (->> (partition 64 (pad byte-seq))
+       (reduce #(compress-fn %1 %2 ch-fn maj-fn) H0)
+       words->bytes))
 
 (defn sha256-bytes
   "SHA-256 of a sequence of byte values (ints 0-255). Returns a 32-element byte vector."
   ([byte-seq] (sha256-bytes byte-seq ch maj))
-  ([byte-seq ch-fn maj-fn]
-   (->> (partition 64 (pad byte-seq))
-        (reduce #(compress %1 %2 ch-fn maj-fn) H0)
-        words->bytes)))
+  ([byte-seq ch-fn maj-fn] (sha256-bytes-with compress byte-seq ch-fn maj-fn)))
 
 (defn sha256d-bytes
   "Bitcoin's SHA256d: SHA256(SHA256(x)). Used for block header hashes, txids and

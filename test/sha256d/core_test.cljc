@@ -38,3 +38,19 @@
       (let [padded (core/pad (repeat n 0))]
         (is (zero? (mod (count padded) 64)))
         (is (pos? (count padded)))))))
+
+(deftest compress-rolling-equivalence-test
+  (testing "the rolling-window schedule strategy is bit-identical to the reference
+            (full-precompute) compress on inputs spanning every padding boundary and
+            enough blocks to exercise the window slide many times over"
+    (doseq [n (range 0 260)]
+      (let [msg (vec (map #(mod (* 37 (inc %)) 256) (range n)))]  ; deterministic, varied
+        (is (= (core/sha256-bytes msg)
+               (core/sha256-bytes-with core/compress-rolling msg core/ch core/maj))
+            (str "n=" n))))
+    (testing "known FIPS vectors also pass via the rolling schedule"
+      (is (= "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+             (core/bytes->hex (core/sha256-bytes-with core/compress-rolling [] core/ch core/maj))))
+      (is (= "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+             (core/bytes->hex (core/sha256-bytes-with core/compress-rolling
+                                                      (core/str->bytes "abc") core/ch core/maj)))))))
