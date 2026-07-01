@@ -37,6 +37,16 @@ Clojure setting). **Shipped API:** `compress` (portable reference) · `compress-
 (JVM ~2.7x) · `compress-v8-inline` (V8 ~3.6x) · `midstate`/`header-hash`/`search-nonce`/
 `search-nonce-parallel`.
 
+**Pivot to the inverse problem (2026-07-02).** After the forward-optimization tournament closed,
+the owner redirected to the *cryptanalytic* question: can the co-scientist approach design an
+algorithm to invert SHA-256 (find a preimage) *below* 2²⁵⁶ brute force? Answer, honestly: yes for
+reduced rounds (real MITM/splice-and-cut attacks), no by any meaningful margin for full 64 rounds.
+This is a separate track from the forward tournament above — see `sha256d.mitm` and
+`docs/preimage-mitm-cosci.md`. The search designs genuine 2¹²⁸ preimages on 16-20 rounds and locates
+the wall at ~24 rounds (word granularity); the message expansion that made forward inversion hard is
+exactly what collapses the attack's neutral sets. Full SHA-256 stays unbroken — the search
+demonstrates the wall, it does not cross it.
+
 ## 2026-07-01 — initial run, JVM (OpenJDK 24, Temurin), Apple Silicon
 
 Three consecutive `clojure -M:evolve` runs (default settings: 3 generations, elite-n 2,

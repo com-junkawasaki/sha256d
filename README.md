@@ -65,6 +65,12 @@ completely different order than round-primitive rewrites -- see
   Reflection (hard correctness gate) -> Ranking (pairwise Elo benchmark tournament) ->
   Proximity (cluster results within 1% as ties) -> Evolution (recombine elites) ->
   Meta-review, for N generations under a Supervisor (`run-tournament`).
+- **`sha256d.mitm`** -- the *inverse* direction: a co-scientist search that **designs
+  below-brute-force preimage attacks** (meet-in-the-middle / splice-and-cut) for reduced-round
+  SHA-256, by finding neutral-word splits over the message-schedule dependency graph. It produces
+  genuine 2¹²⁸ preimages on 16-20 rounds and locates where the attack dies (~24 rounds, when the
+  expansion fan-out collapses the neutral sets). It does **not** break full 64-round SHA-256 — it
+  demonstrates the wall. See `docs/preimage-mitm-cosci.md`.
 
 ## Usage
 
