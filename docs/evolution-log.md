@@ -4,6 +4,39 @@ Append-only. Each entry is the Meta-review output of one `(sha256d.evolve/run-to
 call (or `clojure -M:evolve`), left mostly unedited so this log reflects what the harness
 actually measured, not a cleaned-up narrative.
 
+## Summary — the whole search at a glance (rounds 1-16, complete)
+
+Every lever the co-scientist tournament tried, and what the measurement said. "Verdict" is
+KEPT (in the shipped repo), REJECTED (measured dead end), or SCOPED (bounded, deferred).
+
+| # | Lever tried | Measured result | Verdict |
+|---|---|---|---|
+| 1-3 | Ch/Maj round-primitive formula (naive/alt/or) | within noise on JVM & V8, boxed & unboxed | REJECTED (noise) |
+| 4 | Schedule `:rolling` (16-word window) | ~7-10% slower (subvec/conj alloc + interleave) | REJECTED |
+| 5 | Schedule `:precompute-transient` | ties / slightly worse than precompute | REJECTED |
+| 6 | Schedule `:mutable` (zero-alloc `long-array`) | ties precompute — schedule was never the cost | REJECTED |
+| 7 | **Unboxed round loop** (`compress-primitive`, JVM) | **~2.3x** | **KEPT** |
+| 8 | V8 cross-platform tournament | portable verdicts reproduce on V8 | (validated) |
+| 9 | **V8 `Int32Array` fast path** (`compress-v8`) | **~3.5x** | **KEPT** |
+| 10 | **Inline ch/maj** into the fast paths | JVM **~13%** (→~2.7x total), V8 ~2.4% (→~3.6x) | **KEPT** (best paths) |
+| 11 | Software 2-way multi-buffer interleave | ~6% slower (register spills > ILP gain) | REJECTED |
+| 12 | **midstate + fast compress** (`search-nonce`) | **~4.4x** mining, 1.59×2.78 stacking | **KEPT** |
+| 13 | **Parallel nonce search** (across cores) | **~4.6x on 10 cores** (not linear) | **KEPT** |
+| 14 | Diagnose the parallel plateau | it's turbo frequency scaling, **not** GC/alloc | (allocation-free path REJECTED unbuilt) |
+| 15 | Validate vs the **real Bitcoin genesis block** | reproduces block 0 + Satoshi's nonce | (grounded) |
+| 16 | Hardware-SIMD multi-buffer (JVM Vector API) | 4 NEON lanes exist; naive Clojure port ~6300x slower | SCOPED (needs a Java hot loop) |
+
+**One-line conclusion:** the only lever that ever moved single-hash throughput was removing
+per-operation runtime overhead (boxing/IFn on the JVM, arg-seq-alloc/persistent-indexing on V8);
+neither the Ch/Maj *formula* nor the schedule *data structure* ever mattered, and allocation never
+mattered anywhere (single-thread or parallel). Mining throughput composes three axes — structural
+(midstate 1.6x) × per-op-overhead (fast compress ~2.7x/core) × across-core (threads ~4.6x, hardware-
+frequency-bounded) — reaching ~272k nonce/s on 10 cores, all bit-identical and validated against the
+real genesis block. Sole remaining frontier: a **Java** SIMD hot loop (outside this repo's idiomatic-
+Clojure setting). **Shipped API:** `compress` (portable reference) · `compress-primitive-inline`
+(JVM ~2.7x) · `compress-v8-inline` (V8 ~3.6x) · `midstate`/`header-hash`/`search-nonce`/
+`search-nonce-parallel`.
+
 ## 2026-07-01 — initial run, JVM (OpenJDK 24, Temurin), Apple Silicon
 
 Three consecutive `clojure -M:evolve` runs (default settings: 3 generations, elite-n 2,

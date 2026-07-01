@@ -93,7 +93,7 @@ completely different order than round-primitive rewrites -- see
 ;; scans nonces for a simplified leading-zero-bits target, returns [nonce hash] or nil:
 (midstate/search-nonce core/compress-primitive-inline mid tail-prefix-12 20 0 1000000)
 
-;; across-core parallel nonce search (JVM); ~4.6x on 10 cores (allocation/GC-bound, not linear):
+;; across-core parallel nonce search (JVM); ~4.6x on 10 cores (all-core turbo-frequency-bound, not linear — round 14):
 (midstate/search-nonce-parallel core/compress-primitive-inline mid tail-prefix-12 20 0 1000000 10)
 ```
 
