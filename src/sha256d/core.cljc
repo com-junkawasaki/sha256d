@@ -187,6 +187,53 @@
                   t2 (add32 (big-sigma0 a) (maj-fn a b c))]
               (recur (add32 t1 t2) a b c (add32 d t1) e f g (inc t)))))))))
 
+;; JVM-only primitive helpers for `compress-primitive` (round 7). `^long`-hinted so they
+;; compose without boxing; cljs never sees them (the whole fast path is #?(:clj ...)).
+#?(:clj (def k-array (long-array K)))
+#?(:clj (defn rotr* ^long [^long x ^long n]
+          (bit-and (bit-or (unsigned-bit-shift-right x n) (bit-shift-left x (- 32 n))) 0xffffffff)))
+#?(:clj (defn bsig0* ^long [^long x] (bit-xor (rotr* x 2)  (rotr* x 13) (rotr* x 22))))
+#?(:clj (defn bsig1* ^long [^long x] (bit-xor (rotr* x 6)  (rotr* x 11) (rotr* x 25))))
+
+#?(:clj
+   (defn compress-primitive
+     "JVM-ONLY fast path (round 7). Same mutable `long-array` schedule as `compress-mutable`
+     (round 6 proved the schedule build is not the bottleneck), but the 64-round loop is
+     UNBOXED: `^long` loop locals, `unchecked-add`, primitive rotate/big-sigma (`rotr*`/
+     `bsig0*`/`bsig1*`), and a primitive `long-array` K (`k-array`). Benchmarked against
+     `compress-mutable` (identical schedule, boxed round loop) this isolates the effect of
+     unboxing the round arithmetic — round 6's diagnosed real bottleneck. Still calls the
+     injected `ch-fn`/`maj-fn` (which box, then are unboxed via `long`), so it composes with
+     the :ch/:maj genes; fully inlining ch/maj is a later round. Excluded from the cljs pool;
+     bit-identical gate on the JVM (compress-primitive-equivalence-test)."
+     ([state block] (compress-primitive state block ch maj))
+     ([[h0 h1 h2 h3 h4 h5 h6 h7] block ch-fn maj-fn]
+      (let [^longs w (long-array 64)
+            ^longs karr k-array
+            bw (block->words block)]
+        (dotimes [i 16] (aset w i (long (nth bw i))))
+        (loop [t 16]
+          (when (< t 64)
+            (aset w t (long (add32 (small-sigma1 (aget w (- t 2)))
+                                   (aget w (- t 7))
+                                   (small-sigma0 (aget w (- t 15)))
+                                   (aget w (- t 16)))))
+            (recur (inc t))))
+        (loop [a (long h0) b (long h1) c (long h2) d (long h3)
+               e (long h4) f (long h5) g (long h6) h (long h7) t 0]
+          (if (= t 64)
+            [(bit-and (unchecked-add (long h0) a) 0xffffffff) (bit-and (unchecked-add (long h1) b) 0xffffffff)
+             (bit-and (unchecked-add (long h2) c) 0xffffffff) (bit-and (unchecked-add (long h3) d) 0xffffffff)
+             (bit-and (unchecked-add (long h4) e) 0xffffffff) (bit-and (unchecked-add (long h5) f) 0xffffffff)
+             (bit-and (unchecked-add (long h6) g) 0xffffffff) (bit-and (unchecked-add (long h7) h) 0xffffffff)]
+            (let [t1 (bit-and (unchecked-add (unchecked-add (unchecked-add h (bsig1* e))
+                                                            (unchecked-add (long (ch-fn e f g)) (aget karr t)))
+                                             (aget w t))
+                              0xffffffff)
+                  t2 (bit-and (unchecked-add (bsig0* a) (long (maj-fn a b c))) 0xffffffff)]
+              (recur (bit-and (unchecked-add t1 t2) 0xffffffff) a b c
+                     (bit-and (unchecked-add d t1) 0xffffffff) e f g (inc t)))))))))
+
 (defn compress-rolling
   "Same result as `compress`, but computes the message schedule in a 16-word rolling
   window just-in-time inside the round loop instead of materializing the full 64-word

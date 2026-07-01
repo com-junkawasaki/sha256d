@@ -4,7 +4,8 @@
   utility, not hand-derived, and re-verified by exact string length before use --
   see the ADR for this repo for the derivation transcript)."
   (:require [clojure.test :refer [deftest testing is]]
-            [sha256d.core :as core]))
+            [sha256d.core :as core]
+            [sha256d.ops :as ops]))
 
 (deftest fips-known-answer-test
   (testing "empty message (single block)"
@@ -58,11 +59,19 @@
                                                         (core/str->bytes "abc") core/ch core/maj))))))))
 
 #?(:clj
-   (deftest compress-mutable-equivalence-test
-     (testing "the JVM-only mutable long-array schedule is bit-identical to the reference
-               across every padding boundary and many blocks"
-       (doseq [n (range 0 260)]
+   (deftest jvm-only-schedule-equivalence-test
+     (testing "the JVM-only fast paths (mutable long-array schedule; unboxed round loop)
+               are bit-identical to the reference across every padding boundary and many
+               blocks, and via all ch/maj gene variants for the unboxed path"
+       (doseq [compress-fn [core/compress-mutable core/compress-primitive]
+               n (range 0 260)]
          (let [msg (vec (map #(mod (* 37 (inc %)) 256) (range n)))]
            (is (= (core/sha256-bytes msg)
-                  (core/sha256-bytes-with core/compress-mutable msg core/ch core/maj))
-               (str "n=" n)))))))
+                  (core/sha256-bytes-with compress-fn msg core/ch core/maj))
+               (str compress-fn " n=" n))))
+       ;; the unboxed path composes with the ch/maj genes -- check every combination
+       (doseq [[_ ch-fn]  (:ch ops/gene-pool)
+               [_ maj-fn] (:maj ops/gene-pool)]
+         (let [msg (core/str->bytes "compose-primitive-with-ch-maj-genes")]
+           (is (= (core/sha256-bytes msg)
+                  (core/sha256-bytes-with core/compress-primitive msg ch-fn maj-fn))))))))

@@ -331,3 +331,66 @@ first thing that should actually move ns/hash (and might finally make the Ch/Maj
 differences visible above the noise, since boxing currently swamps them). `^long` hints are
 valid `.cljc` (cljs ignores them), so a portable primitive round function is plausible —
 that would be the first genuine, portable positive result if it lands.
+
+## 2026-07-01 (round 7) — THE FIRST POSITIVE RESULT: unboxing the round loop is ~2.3x
+
+Round 6's diagnosis (bottleneck = boxed round arithmetic, not the schedule) made a sharp,
+falsifiable prediction. Round 7 tested it:
+
+- `sha256d.core/compress-primitive` (JVM-only, `#?(:clj ...)`): the *same* mutable
+  `long-array` schedule as `compress-mutable` (so the schedule is held constant vs round 6),
+  but the 64-round loop is UNBOXED — `^long` loop locals, `unchecked-add`, primitive
+  `rotr*`/`bsig0*`/`bsig1*` (return-hint on the arg vector — the first cut mis-placed it on
+  the fn name and threw `AbstractMethodError: invokePrim(J)…is abstract`; fixed), and a
+  primitive `long-array` K. Confirmed **zero reflection warnings** (genuinely unboxed) and
+  bit-identical across 260 sizes AND all 9 ch/maj gene combinations. Still calls injected
+  `ch-fn`/`maj-fn` (a residual boxing island), so it composes with the :ch/:maj genes.
+  Excluded from the cljs pool; JVM pool now `:ch(3) x :maj(3) x :schedule(5) = 45`.
+  18 tests / 6294 assertions; cljs proof still 6/6.
+
+Three runs (champion + a boxed reference row + rolling tail):
+
+```
+run 1: champ {alt,alt,:primitive} 20692 ns/hash (elo 1370); ...all :primitive ~20.2-21.0k...
+       {alt,alt,:mutable} 47123; {alt,alt,:precompute} 46741; {alt,alt,:rolling} 49835
+run 2: champ {naive,alt,:primitive} 20074; ...:primitive ~20.1-20.6k...; :precompute 46637; :rolling 49572
+run 3: champ {alt,alt,:primitive} 20450; ...:primitive ~20.0-20.4k...; :precompute 46893; :rolling 49464
+```
+
+**Findings:**
+
+18. **First positive result, and it's decisive: unboxing the round loop is ~2.3x.** Every
+    `:primitive` candidate lands at ~20-21k ns/hash; every boxed schedule variant
+    (precompute/mutable/transient) at ~46.6-47.5k; rolling ~49.5k. That's 46.7k/20.4k ≈
+    **2.29x**, consistent across all 3 runs, with a clean, huge Elo gap (primitives
+    ~1090-1388, boxed ~815-1130). This exactly confirms round 6's prediction: `:mutable`
+    (mutable schedule, *boxed* round) ties precompute at ~47k, and adding unboxing to that
+    *same* schedule drops it to ~20k — so the lever was the round arithmetic's boxing, full
+    stop, isolated cleanly because the schedule was held constant between :mutable and
+    :primitive.
+19. **Ch/Maj is STILL noise, even unboxed** (round 3 survives): among the primitives,
+    `{:ch :naive}` even wins run 2, and all 9 primitive candidates sit within a few % of each
+    other. Removing boxing did not make the formula choice matter — it genuinely doesn't for
+    throughput (the round is dominated by the σ/add chain and memory, not the one ch/maj gate
+    difference; and ch/maj here are still the residual boxed calls anyway).
+20. **The win is JVM-only, not portable — stated honestly.** `compress-primitive` uses
+    `long-array` + `^long` and is `#?(:clj ...)`; ClojureScript never sees it. On V8 there is
+    no boxed-`Long` problem to fix (JS numbers are unboxed doubles natively), so this specific
+    ~2.3x does not transfer, and the cljs performance question remains unmeasured. The
+    portable reference `compress` stays the default; `compress-primitive` is an opt-in JVM
+    fast path (`sha256-bytes-with compress-primitive …`).
+
+**Meta (rounds 1-7):** the optimization arc is now essentially complete and, crucially,
+*correctly ordered by the harness*: Ch/Maj formula (rounds 1-3) = noise; schedule data
+structure (rounds 4-6, incl. a zero-alloc mutable buffer) = no help / rolling hurts; unboxed
+round arithmetic (round 7) = the one real lever, ~2.3x on the JVM. The co-scientist loop
+rejected four plausible dead-ends and, by elimination, drove straight to the actual
+bottleneck — which is exactly what a diagnosis-by-tournament is supposed to do. The single
+biggest correctness catch along the way (the JS shift-count bug, round 3) and the biggest
+speed lever (round 7) both came from *taking the mechanism seriously*, not from guessing.
+
+**Still open:** whether *any* restructuring helps on cljs/V8 (needs a node benchmark harness —
+the tournament has only ever been run on the JVM); fully inlining ch/maj to remove the last
+boxing island (likely small, given finding 19); and batch/lane-parallel (multi-message)
+hashing, which needs real SIMD (JVM Vector API / WASM SIMD) to beat the reference and is
+therefore also non-portable.
