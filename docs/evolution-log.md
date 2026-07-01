@@ -613,3 +613,52 @@ paths is hardware SIMD multi-buffer (Vector API / WASM SIMD) — materially larg
 and changes the API to hash-N-nonces-at-once; deferred as the sole remaining frontier, now with
 the empirical result that its *software imitation doesn't work*, so the SIMD registers are the
 actual mechanism, not the interleaving idea per se.
+
+## 2026-07-02 (round 12) — composed the two big wins into a mining nonce search: ~4.4x, multiplicative
+
+The single-hash optimization search is closed (rounds 1-11). But the repo's two biggest wins had
+never actually been combined: `sha256d.midstate` (the structural mining win, built early) still
+used the *reference* `compress`, and there was no nonce-search primitive. Round 12 ties them
+together — the concrete Bitcoin payoff — and tests whether they stack.
+
+- `sha256d.midstate/header-hash-with` (injectable compress-fn for BOTH the inner chunk2 and the
+  outer 32-byte SHA-256) + `search-nonce` (scan nonces through a chosen compress strategy for a
+  simplified leading-zero-bits target). `header-hash` now delegates to `header-hash-with` +
+  reference `compress`. Bit-identical: `header-hash-with compress-primitive-inline` matches the
+  reference on 300 random headers, and `search-nonce` finds the *identical* winning nonce with the
+  reference and the JVM fast path. 21 tests / 7457 assertions; cljs proof 7/7.
+
+Per-nonce throughput (JVM, ns/nonce, result-folded vs DCE):
+
+```
+naive (full 80-byte header sha256d, reference compress)  76584 ns/nonce   1.00x
+midstate + reference compress                            48142 ns/nonce   1.59x
+midstate + fast compress (compress-primitive-inline)     17304 ns/nonce   4.43x  (2.78x over midstate-ref)
+```
+
+**Findings:**
+
+34. **The two wins stack multiplicatively: ~4.4x combined mining throughput over naive.**
+    1.59 (midstate) x 2.78 (fast compress) = 4.42 ≈ the measured 4.43x. No interaction, no
+    surprise — which is exactly the confirmation: two independent, independently-validated
+    optimizations compose cleanly.
+35. **Precise accounting of the midstate factor: 1.59x, not 2x.** Per nonce, naive does 3
+    compressions (2 inner blocks over the 128-byte padded header + 1 outer block over the 32-byte
+    inner digest); midstate does 2 (1 inner chunk2 + 1 outer), since chunk1 is cached. 3/2 = 1.5x
+    expected; 1.59x measured (the cached chunk1 also saves its schedule build). The earlier
+    "roughly halving the *inner* SHA-256" phrasing was right about the inner hash but the *total*
+    per-nonce win is 1.5-1.6x because the outer block is unavoidable. The fast-compress factor
+    (2.78x) matches round 10's ~2.7x head-to-head exactly.
+36. **All bit-identical — the fast mining path mines the same chain.** Because every compress
+    strategy is bit-identical (the hard correctness gate held across all 12 rounds), swapping in
+    the fast path changes only speed, never which nonce wins. `search-nonce` is portable (pass
+    `core/compress`); the ~4.4x is the JVM opt-in (`compress-primitive-inline`), ~similar stacking
+    would hold on V8 with `compress-v8-inline` (untested throughput, but the same composition).
+
+**Meta (rounds 1-12):** the arc that began as "efficiently derive Bitcoin's SHA-256" ends with a
+concrete, bit-identical **~4.4x mining nonce search** (`search-nonce`), built by composing the two
+wins the co-scientist search actually validated: the structural midstate reuse and the
+per-operation-overhead fast path. Everything the tournament *rejected* (Ch/Maj formula, schedule
+data structure, software multi-buffer) correctly stayed out. The only frontier beyond this remains
+hardware-SIMD multi-buffer (non-portable, N-nonces-at-once) — deferred, and now with the whole
+rest of the space mapped and measured beneath it.

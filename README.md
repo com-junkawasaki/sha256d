@@ -53,9 +53,12 @@ completely different order than round-primitive rewrites -- see
   randomized 32-bit words) in `test/sha256d/ops_test.cljc`. The `:schedule` gene is an
   implementation-strategy axis rather than a per-bit formula (`:precompute`, `:rolling`,
   `:precompute-transient`, JVM-only `:mutable` and `:primitive`, and cljs-only `:v8`).
-- **`sha256d.midstate`** -- Bitcoin block-header mining's classic optimization: cache
-  the compression state after a header's constant first 64 bytes so each nonce attempt
-  only re-runs the second block's 64 rounds, not the whole 80-byte header.
+- **`sha256d.midstate`** -- Bitcoin block-header mining: cache the compression state after a
+  header's constant first 64 bytes so each nonce attempt only re-runs the second block, not
+  the whole 80-byte header (`midstate`, `header-hash`). `header-hash-with` takes an injectable
+  compress strategy and `search-nonce` scans nonces through it — composing the midstate reuse
+  with a fast compress path gives **~4.4x mining throughput** over naive full-header hashing
+  (1.59x from midstate × 2.78x from the fast path), bit-identical (finds the same winning nonce).
 - **`sha256d.evolve`** -- the tournament: Generation (enumerate gene combinations) ->
   Reflection (hard correctness gate) -> Ranking (pairwise Elo benchmark tournament) ->
   Proximity (cluster results within 1% as ties) -> Evolution (recombine elites) ->
@@ -77,12 +80,16 @@ completely different order than round-primitive rewrites -- see
 ```
 
 ```clojure
-(require '[sha256d.midstate :as midstate])
+(require '[sha256d.midstate :as midstate] '[sha256d.core :as core])
 
 ;; header is a vector of 80 byte-values (version|prevhash|merkleroot|time|bits|nonce)
 (let [mid (midstate/midstate header)]
   ;; re-run this per nonce attempt against the same header prefix -- `mid` is computed once
   (midstate/header-hash mid (subvec header 64 80)))
+
+;; mining nonce search — midstate reuse + a fast compress path (~4.4x over naive on the JVM);
+;; scans nonces for a simplified leading-zero-bits target, returns [nonce hash] or nil:
+(midstate/search-nonce core/compress-primitive-inline mid tail-prefix-12 20 0 1000000)
 ```
 
 ```bash

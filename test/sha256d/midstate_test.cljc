@@ -31,6 +31,33 @@
           (is (= (ms/header-hash-reference header)
                  (ms/header-hash mid tail))))))))
 
+(deftest header-hash-with-fast-path-test
+  (testing "header-hash-with the JVM fast compress finds the identical hash as the reference,
+            on many random headers -- the two mining wins (midstate + fast compress) compose
+            without changing the result"
+    #?(:clj
+       (dotimes [_ 300]
+         (let [header (rand-header)
+               mid    (ms/midstate header)
+               tail   (subvec header 64 80)]
+           (is (= (ms/header-hash-reference header)
+                  (ms/header-hash-with core/compress-primitive-inline mid tail))))))))
+
+(deftest search-nonce-cross-strategy-test
+  (testing "search-nonce finds the same winning nonce with the reference and (on the JVM) the
+            fast compress -- correctness is independent of the compression strategy"
+    (let [prefix12 (vec (repeatedly 12 rand-byte))
+          ;; a fixed header prefix -> one midstate; vary only the nonce
+          mid      (ms/midstate (into (vec (repeatedly 64 rand-byte)) (repeat 16 0)))
+          zero-bits 8            ;; ~1/256 hit rate -> found within a few hundred nonces
+          ref-hit  (ms/search-nonce core/compress mid prefix12 zero-bits 0 5000)]
+      (is (some? ref-hit) "a nonce meeting an 8-leading-zero-bit target exists within 5000 tries")
+      (when ref-hit
+        (is (>= (#'ms/leading-zero-bits (reverse (second ref-hit))) zero-bits)))
+      #?(:clj
+         (is (= ref-hit (ms/search-nonce core/compress-primitive-inline mid prefix12 zero-bits 0 5000))
+             "the JVM fast path finds the identical winning nonce as the reference")))))
+
 (deftest synthetic-header-fixture-test
   (testing "synthetic (non-genesis) 80-byte header, sha256d cross-checked via Python hashlib"
     (let [header-hex "010000000000000000000000000000000000000000000000000000000000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f29ab5f491d00ffff7c2bac1d"
