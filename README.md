@@ -84,9 +84,10 @@ completely different order than round-primitive rewrites -- see
 ```
 
 ```bash
-clojure -M:test               # correctness suite (JVM) -- 5100+ assertions
-clojure -M:cljs && node target/cljs-verify.js   # portability proof (node)
-clojure -M:evolve              # run the tournament, print a Meta-review report
+clojure -M:test               # correctness suite (JVM) -- 6000+ assertions
+clojure -M:cljs && node target/cljs-verify.js        # correctness portability proof (node)
+clojure -M:evolve             # run the tournament on the JVM, print a Meta-review report
+clojure -M:cljs-bench && node target/cljs-bench.js   # run the same tournament on V8 (node)
 ```
 
 ## Portability
@@ -145,11 +146,18 @@ honest across rounds:
   is the entire win — and Ch/Maj is *still* noise even unboxed (round 3 survives). The win is
   **JVM-only** (V8 has no boxed-`Long` problem); the portable reference stays the default.
 
-**Net (rounds 1-7):** the harness correctly ordered the whole search space by elimination —
-Ch/Maj formula (noise) → schedule data structure (no help; rolling hurts) → **unboxed round
-arithmetic (~2.3x, the one real lever)**. It rejected four plausible dead-ends before
-triangulating the actual bottleneck, then confirmed it with a clean isolated experiment.
+- **Round 8** (cross-platform validation): ran the *same* tournament under ClojureScript/node
+  for the first time. The portable verdicts **reproduce on V8** — precompute best, transient
+  worse, rolling last, Ch/Maj noise — so they weren't JVM-JIT artifacts. V8 is ~3x slower in
+  absolute terms (~135k ns/hash) and has no analog to the JVM-only `:primitive` win (JS numbers
+  are unboxed doubles; nothing for `^long` to fix), correctly confirming that win as JVM-only.
 
-Open follow-ups: benchmarking under node (does *any* restructuring help on V8? — untested);
-fully inlining ch/maj to kill the last boxing island (likely small); batch/lane-parallel
-(multi-message) hashing, which needs real SIMD and is likewise non-portable.
+**Net (rounds 1-8):** the harness ordered the whole search space by elimination —
+Ch/Maj formula (noise) → schedule data structure (no help; rolling hurts) → **unboxed round
+arithmetic (~2.3x, the one real lever, JVM-only)** — rejecting four dead-ends before
+triangulating the bottleneck, then confirming the *portable* verdicts on both the JVM and V8.
+
+Open follow-ups (all non-portable or infrastructural): fully inlining ch/maj to kill the last
+boxing island (likely small); a V8-specific `Int32Array`+`>>> 0` fast path (the cljs analog of
+the JVM `long-array` path); and a SIMD batch-of-N-messages hasher (JVM Vector API / WASM SIMD) —
+the only path that could beat the reference, for the mining use case.

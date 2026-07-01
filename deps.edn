@@ -21,4 +21,11 @@
                      "-c" "sha256d.cljs-verify"]}
   ;; the co-scientist/AlphaEvolve-shaped tournament over sha256d.ops' gene pool.
   ;;   clojure -M:evolve >> docs/evolution-log.md
-  :evolve {:main-opts ["-m" "sha256d.evolve"]}}}
+  :evolve {:main-opts ["-m" "sha256d.evolve"]}
+  ;; run the SAME tournament under ClojureScript/node — tests whether the JVM speed
+  ;; conclusions hold on V8 (round 8).  clojure -M:cljs-bench && node target/cljs-bench.js
+  :cljs-bench {:extra-paths ["test"]
+               :extra-deps {org.clojure/clojurescript {:mvn/version "1.11.132"}}
+               :main-opts ["-m" "cljs.main"
+                           "-co" "{:optimizations :simple :target :nodejs :main sha256d.cljs-bench :output-to \"target/cljs-bench.js\"}"
+                           "-c" "sha256d.cljs-bench"]}}}

@@ -394,3 +394,56 @@ the tournament has only ever been run on the JVM); fully inlining ch/maj to remo
 boxing island (likely small, given finding 19); and batch/lane-parallel (multi-message)
 hashing, which needs real SIMD (JVM Vector API / WASM SIMD) to beat the reference and is
 therefore also non-portable.
+
+## 2026-07-02 (round 8) — ran the tournament on V8: the portable rankings hold cross-platform
+
+Rounds 1-7 measured *speed* only on the JVM. Since the repo's whole premise is portable
+`.cljc`, that's a real gap: are "rolling is worst / transient ties-or-loses / Ch/Maj is
+noise" genuine properties, or JVM-JIT artifacts? Round 8 finally runs `run-tournament` under
+ClojureScript/node — the first time the harness's `now-ns` cljs branch (`js/performance.now`,
+written back in round 3) has ever executed. New `sha256d.cljs-bench` ns + `:cljs-bench` deps
+alias; the cljs pool is the 27 portable candidates (JVM-only `:mutable`/`:primitive` excluded).
+
+Three node/V8 runs, same default methodology as the JVM (200 iters x 7 reps, 3 gens):
+
+```
+run 1: champ {alt,alt,:precompute} 135142 ns/hash; ...5 :precompute 134.3-137.0k...;
+       transient 141036; rolling 145118 (last)
+run 2: champ {or,naive,:precompute} 136003; transient 144005; rolling 147953 (last)
+run 3: champ {or,or,:precompute}   137045; transient 142988; rolling 147141 (last)
+```
+
+**Findings:**
+
+21. **The portable performance conclusions transfer JVM -> V8 — they were not JIT artifacts.**
+    All 4 qualitative verdicts reproduce on V8: `:precompute` is best (champion in all 3 runs),
+    `:precompute-transient` is clearly worse (~142-144k vs ~135-137k), `:rolling` is dead-last
+    (all 3 runs — now confirmed on *both* runtimes across 7+3 = 10 tournament runs total), and
+    Ch/Maj is noise (the champion's ch/maj varies run-to-run: alt/alt, or/naive, or/or, all
+    within ~2%). Same ordering as the JVM; the co-scientist harness gives the same scientific
+    answer on two independent runtimes.
+22. **Absolute speed and the unboxing win are, as expected, NOT portable.** V8 runs at ~135k
+    ns/hash — ~3x slower than the JVM boxed variants (~47k) and ~7x slower than the JVM unboxed
+    `:primitive` (~20k). There is no V8 analog to `:primitive`: it's excluded from the cljs pool,
+    and V8 has no boxed-`Long` problem for `^long`/`unchecked-add` to fix (JS numbers are unboxed
+    doubles). So round 7's ~2.3x is correctly scoped as a JVM-only lever, and V8's floor for a
+    single-stream persistent-vector hash is simply higher.
+23. **Nuance — transient/rolling penalties are slightly *larger* on V8.** `:precompute-transient`
+    is ~5% slower than `:precompute` on V8 vs within-noise on the JVM, and rolling's gap is
+    likewise a touch wider. Consistent mechanism: V8 lacks the JVM's JIT escape-analysis that
+    makes short-lived persistent `conj` nodes nearly free, so transient's fixed overhead and
+    rolling's per-step `subvec`/`conj` show up a bit more starkly. Direction identical, magnitude
+    modestly amplified — which, if anything, *strengthens* the JVM findings.
+
+**Meta (rounds 1-8):** the investigation is now complete on both runtimes. Portable verdicts
+(precompute is the best portable strategy; transient/rolling don't help; Ch/Maj is noise) hold
+on JVM *and* V8. The one non-portable win (unboxed round arithmetic, ~2.3x) is JVM-only and
+labeled as such. The harness did its job: correct rankings, reproduced cross-platform, with
+every claim scoped to where it was actually measured.
+
+**Genuinely still open (all non-portable or infrastructural):** fully inlining ch/maj (small,
+per finding 19); a WASM/`wgpu` or JVM-Vector-API SIMD batch-of-N-messages hasher (the only path
+that could beat the reference, for the mining use case specifically); and — if ever wanted — a
+V8-specific fast path (e.g. `Int32Array` with explicit `>>> 0` unsigned coercion), the cljs
+analog of the JVM `long-array` path, which round 8's numbers suggest is where V8 headroom
+would be, if anywhere.
