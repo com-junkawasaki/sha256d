@@ -1,0 +1,24 @@
+;; sha256d-clj -- portable .cljc SHA-256 / Bitcoin SHA-256d reference implementation,
+;; plus an interchangeable "gene pool" of proven-equivalent round-primitive
+;; formulations and a self-contained evolutionary benchmark tournament over them.
+;; Zero third-party deps for the core; JVM Clojure + ClojureScript both run the same
+;; .cljc source (see README.md "Portability").
+{:paths ["src"]
+ :deps {}
+ :aliases
+ {:test {:extra-paths ["test"]
+         :extra-deps {io.github.cognitect-labs/test-runner
+                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
+         :main-opts ["-m" "cognitect.test-runner"]
+         :exec-fn cognitect.test-runner.api/test}
+  ;; PORTABILITY PROOF: compile the CPU-only .cljc core to JS and run it on node,
+  ;; mirroring com-junkawasaki/num-clj's cljs-verify pattern.
+  ;;   clojure -M:cljs && node target/cljs-verify.js
+  :cljs {:extra-paths ["test"]
+         :extra-deps {org.clojure/clojurescript {:mvn/version "1.11.132"}}
+         :main-opts ["-m" "cljs.main"
+                     "-co" "{:optimizations :simple :target :nodejs :main sha256d.cljs-verify :output-to \"target/cljs-verify.js\"}"
+                     "-c" "sha256d.cljs-verify"]}
+  ;; the co-scientist/AlphaEvolve-shaped tournament over sha256d.ops' gene pool.
+  ;;   clojure -M:evolve >> docs/evolution-log.md
+  :evolve {:main-opts ["-m" "sha256d.evolve"]}}}
