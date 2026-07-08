@@ -12,6 +12,9 @@
 (defn rand-byte [] (rand-int 256))
 (defn rand-header [] (vec (repeatedly ms/header-length-bytes rand-byte)))
 
+(defn hex-byte->int [s]
+  #?(:clj (Integer/parseInt s 16) :cljs (js/parseInt s 16)))
+
 (deftest midstate-equivalence-property-test
   (testing "header-hash via cached midstate matches the no-caching reference, on many random headers"
     (dotimes [_ 500]
@@ -67,7 +70,7 @@
             Header + hash independently verified via Python hashlib (see the round-15 log)."
     (let [header-hex "0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4a29ab5f49ffff001d1dac2b7c"
           genesis    "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
-          header     (vec (map #(Integer/parseInt (apply str %) 16) (partition 2 header-hex)))
+          header     (vec (map #(hex-byte->int (apply str %)) (partition 2 header-hex)))
           nonce      2083236893]
       (is (= 80 (count header)))
       (testing "core sha256d of the genesis header, in block-explorer (reversed) display order"
@@ -91,7 +94,7 @@
   (testing "synthetic (non-genesis) 80-byte header, sha256d cross-checked via Python hashlib"
     (let [header-hex "010000000000000000000000000000000000000000000000000000000000000000000000000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f29ab5f491d00ffff7c2bac1d"
           expected   "7f02852d8625141943ac4f39a7d8a976182f32efe3cd686e8568c2db23536af8"
-          header     (vec (map #(Integer/parseInt (apply str %) 16) (partition 2 header-hex)))]
+          header     (vec (map #(hex-byte->int (apply str %)) (partition 2 header-hex)))]
       (is (= 80 (count header)))
       (is (= expected (core/bytes->hex (ms/header-hash-reference header))))
       (is (= expected (core/bytes->hex (ms/header-hash (ms/midstate header) (subvec header 64 80))))))))
