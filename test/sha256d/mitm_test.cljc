@@ -39,8 +39,7 @@
 
 (deftest inverse-round-test
   (testing "round-inv is the exact inverse of round-fwd on random states/subkeys"
-    (let [rng (java.util.Random. 7)
-          rw  (fn [] (bit-and (.nextLong rng) 0xffffffff))]
+    (let [rw (fn [] (bit-or (rand-int 65536) (bit-shift-left (rand-int 65536) 16)))]
       (dotimes [_ 500]
         (let [state (vec (repeatedly 8 rw))
               wt (rw) t (rand-int 64)]
