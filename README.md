@@ -1,4 +1,4 @@
-# sha256d-clj
+# sha256d
 
 A portable **`.cljc` SHA-256 / Bitcoin SHA-256d** reference implementation, plus a
 small **evolutionary benchmark tournament** over interchangeable, individually-proven
