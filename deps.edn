@@ -1,4 +1,4 @@
-;; sha256d-clj -- portable .cljc SHA-256 / Bitcoin SHA-256d reference implementation,
+;; sha256d -- portable .cljc SHA-256 / Bitcoin SHA-256d reference implementation,
 ;; plus an interchangeable "gene pool" of proven-equivalent round-primitive
 ;; formulations and a self-contained evolutionary benchmark tournament over them.
 ;; Zero third-party deps for the core; JVM Clojure + ClojureScript both run the same
