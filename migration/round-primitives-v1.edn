@@ -1,0 +1,21 @@
+{:migration/id :sha256d/round-primitives-v1
+ :status :candidate
+ :source-of-truth {:legacy "src/sha256d/ops.cljc"
+                   :kernel "src/sha256d/round_primitives.kotoba"}
+ :domain {:inputs [:i64 :i64 :i64]
+          :semantics :signed-i64-bitvector
+          :functions [:ch :ch-alt :ch-or :maj :maj-alt :maj-or]
+          :proof-basis :bitwise-operations-are-independent-per-bit
+          :normalization
+          {:bit-not-x [:bit-xor :x -1]
+           :bit-or-ab [:bit-xor [:bit-xor :a :b] [:bit-and :a :b]]
+           :reason :compiler-bit-not-and-bit-or-not-yet-admitted}}
+ :compiler-fix {:pull-request "https://github.com/kotoba-lang/compiler/pull/117"
+                :commit "78f43e64125e9c4bbe2bfb3a9520ae4b767dc275"
+                :scope :parameterized-i64-bit-xor-and-bit-and-wasm-lowering}
+ :excluded [:message-schedule :compression :digest :benchmark-tournament
+            :platform-specific-fast-paths]
+ :evidence {:cljc-oracle "test/sha256d/round_primitives_matrix_test.clj"
+            :kotoba-conformance "test/sha256d/round_primitives_conformance.kotoba"
+            :web-wasm-verifier "scripts/verify-kotoba-round-primitives.mjs"
+            :matrix-values 7 :matrix-tuples 343 :checks-per-target 686}}

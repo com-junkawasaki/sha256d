@@ -47,6 +47,20 @@ jobs:
       - name: Lint (clj-kondo)
         run: clojure -M:lint
 
+      - name: Compile Kotoba round primitives
+        run: |
+          mkdir -p target/kotoba
+          clojure -M:kotoba compile test/sha256d/round_primitives_conformance.kotoba \
+            --source-path src --target js-browser --output target/kotoba/round.mjs
+          clojure -M:kotoba compile test/sha256d/round_primitives_conformance.kotoba \
+            --source-path src --target wasm32-browser --output target/kotoba/round.wasm
+
+      - name: Execute Kotoba Web and Wasm signed-i64 matrix
+        run: |
+          compiler_src="$(clojure -Spath -M:kotoba | tr ':' '\n' | grep '/compiler/' | head -1)"
+          node scripts/verify-kotoba-round-primitives.mjs target/kotoba/round.mjs \
+            target/kotoba/round.wasm "$(dirname "$compiler_src")/runtime/browser-host.mjs"
+
   cljs-portability:
     name: cljs portability proof (node)
     runs-on: ubuntu-latest
