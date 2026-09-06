@@ -131,6 +131,12 @@ bug this repo actually hit and fixed (`test/sha256d/cljs_verify.cljs`, run under
 is what caught it -- the JVM test suite alone did not, since `unsigned-bit-shift-right`
 on a `long` is 64-bit-aware and masked the bug).
 
+The two JVM-only RNG uses (`src/sha256d/mitm.cljc` `run-mitm` and the JVM test's
+2-way `compress` equivalence) used to hold `java.util.Random`; they now use
+**`kotoba-lang/prng`** (`kotoba.prng`), a kotoba-lang first-party deterministic
+PRNG with JVM/ClojureScript bit-parity. The core stays zero THIRD-party deps;
+`prng` is kotoba-lang's own portable lib.
+
 ## Status / follow-ups
 
 See `docs/evolution-log.md` for what the tournament has actually found, kept deliberately

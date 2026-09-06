@@ -19,6 +19,7 @@
   W0..W15 each expanded word W_t (t>=16) transitively depends on, via
   W_t = sigma1(W_{t-2}) + W_{t-7} + sigma0(W_{t-15}) + W_{t-16}."
   (:require [clojure.set :as set]
+            [kotoba.prng :as prng]
             [sha256d.core :as core]))
 
 (def n-bits 256)   ; digest / internal-state size
@@ -156,15 +157,21 @@
      recovered; we count compression-chunk evaluations for MITM vs the same-space brute force
      and verify the recovered pair really collides on the m bits. Returns a result map."
      [{:keys [r s d m seed] :or {r 8 s 4 d 11 m 26 seed 42}}]
-     (let [rng   (java.util.Random. seed)
-           rw    (fn [] (bit-and (.nextLong rng) 0xffffffff))
-           fixed (mapv (fn [_] (rw)) (range r))         ; baseline subkeys for rounds 1..r-2 used as-is
-           mask  (dec (bit-shift-left 1 d))
-           hi0   (bit-and (rw) (bit-not mask))          ; fixed high bits of the two free subkeys
-           hiL   (bit-and (rw) (bit-not mask))
-           ;; plant a true solution: free low-d bits chosen in-range
-           w0*   (bit-or hi0 (bit-and (rw) mask))
-           wL*   (bit-or hiL (bit-and (rw) mask))
+         (let [;; deterministic PRNG (kotoba.prng) replaces java.util.Random; the
+               ;; same seed drives the same word stream on every host.
+               s0    (prng/seed-state seed)
+               words (loop [st s0 acc [] n (+ r 4)]        ; r fixed + hi0,hiL,w0*,wL*
+                       (if (zero? n)
+                         (vec acc)
+                         (let [[w st'] (prng/word-32 st)]
+                           (recur st' (conj acc w) (dec n)))))
+               fixed (vec (take r words))                  ; baseline subkeys for rounds 1..r-2
+               hi0   (bit-and (nth words r) (bit-not (dec (bit-shift-left 1 d))))
+               hiL   (bit-and (nth words (inc r)) (bit-not (dec (bit-shift-left 1 d))))
+               mask  (dec (bit-shift-left 1 d))
+               ;; plant a true solution: free low-d bits chosen in-range
+               w0*   (bit-or hi0 (bit-and (nth words (+ r 2)) mask))
+               wL*   (bit-or hiL (bit-and (nth words (+ r 3)) mask))
            ws*   (-> fixed (assoc 0 w0*) (assoc (dec r) wL*))
            target (chunk-fwd core/H0 ws* 0 r)           ; full r-round output of the planted solution
            evals (atom 0)
