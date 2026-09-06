@@ -4,6 +4,7 @@
   utility, not hand-derived, and re-verified by exact string length before use --
   see the ADR for this repo for the derivation transcript)."
   (:require [clojure.test :refer [deftest testing is]]
+            [kotoba.prng :as prng]
             [sha256d.core :as core]
             [sha256d.ops :as ops]))
 
@@ -80,12 +81,31 @@
    (deftest compress-2way-equivalence-test
      (testing "each lane of the interleaved 2-way compress is bit-identical to the single-lane
                compress-primitive-inline, on many random (state, block) pairs"
-       (let [rng (java.util.Random. 42)
-             rand-word (fn [] (bit-and (.nextLong rng) 0xffffffff))
-             rand-state (fn [] (vec (repeatedly 8 rand-word)))
-             rand-block (fn [] (vec (repeatedly 64 #(.nextInt rng 256))))]
-         (dotimes [_ 300]
-           (let [s1 (rand-state) b1 (rand-block) s2 (rand-state) b2 (rand-block)
+       ;; deterministic PRNG (kotoba.prng) replaces java.util.Random so the same
+       ;; seed drives the same pairs on every host.
+       (loop [seed (prng/seed-state 42) i 0]
+         (when (< i 300)
+           (let [[w1 seed1] (prng/word-32 seed)
+                 [w2 seed2] (prng/word-32 seed1)
+                 [w3 seed3] (prng/word-32 seed2)
+                 [w4 seed4] (prng/word-32 seed3)
+                 [w5 seed5] (prng/word-32 seed4)
+                 [w6 seed6] (prng/word-32 seed5)
+                 [w7 seed7] (prng/word-32 seed6)
+                 [w8 seed8] (prng/word-32 seed7)
+                 s1 [w1 w2 w3 w4 w5 w6 w7 w8]
+                 b1 (vec (for [_ (range 64)] (first (prng/next-int seed8 256))))
+                 [x1 seed9]  (prng/word-32 seed8)
+                 [x2 seed10] (prng/word-32 seed9)
+                 [x3 seed11] (prng/word-32 seed10)
+                 [x4 seed12] (prng/word-32 seed11)
+                 [x5 seed13] (prng/word-32 seed12)
+                 [x6 seed14] (prng/word-32 seed13)
+                 [x7 seed15] (prng/word-32 seed14)
+                 [x8 seed16] (prng/word-32 seed15)
+                 s2 [x1 x2 x3 x4 x5 x6 x7 x8]
+                 b2 (vec (for [_ (range 64)] (first (prng/next-int seed16 256))))
                  [o1 o2] (core/compress-primitive-2way s1 b1 s2 b2)]
              (is (= (core/compress-primitive-inline s1 b1) o1))
-             (is (= (core/compress-primitive-inline s2 b2) o2))))))))
+             (is (= (core/compress-primitive-inline s2 b2) o2))
+             (recur seed16 (inc i))))))))
