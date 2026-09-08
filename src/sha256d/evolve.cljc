@@ -25,7 +25,7 @@
   lets near-tied candidates separate.
 
   Entry point: `(run-tournament)` for defaults, or `clojure -M -m sha256d.evolve`."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [sha256d.core :as core]
             [sha256d.ops :as ops]))
 
