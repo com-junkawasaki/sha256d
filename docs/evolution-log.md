@@ -1,7 +1,7 @@
 # Evolution log
 
 Append-only. Each entry is the Meta-review output of one `(sha256d.evolve/run-tournament)`
-call (or `clojure -M:evolve`), left mostly unedited so this log reflects what the harness
+call (or `kbb -M:evolve`), left mostly unedited so this log reflects what the harness
 actually measured, not a cleaned-up narrative.
 
 ## Summary — the whole search at a glance (rounds 1-16, complete)
@@ -49,7 +49,7 @@ demonstrates the wall, it does not cross it.
 
 ## 2026-07-01 — initial run, JVM (OpenJDK 24, Temurin), Apple Silicon
 
-Three consecutive `clojure -M:evolve` runs (default settings: 3 generations, elite-n 2,
+Three consecutive `kbb -M:evolve` runs (default settings: 3 generations, elite-n 2,
 200 iters x 7 reps per benchmark) over the current 2x2 gene pool (`sha256d.ops/ch-naive`
 vs `ch-alt`, `maj-naive` vs `maj-alt`):
 
@@ -97,10 +97,10 @@ Added `sha256d.ops/ch-or` and `maj-or`: the same pairwise terms as `ch-naive`/
 `maj-naive` but OR'd instead of XOR'd, valid because the terms being combined are
 pairwise-disjoint (Ch) or never exactly-two-1 (Maj) -- see their doc-comments for the
 proofs, and `test/sha256d/ops_test.cljk`'s exhaustive truth-table + randomized checks.
-Gene pool is now 3x3 = 9 candidates. `clojure -M:test` (14 tests, 5154 assertions) and
+Gene pool is now 3x3 = 9 candidates. `kbb -M:test` (14 tests, 5154 assertions) and
 the cljs proof (5/5) both still pass.
 
-Three more `clojure -M:evolve` runs, same defaults:
+Three more `kbb -M:evolve` runs, same defaults:
 
 ```
 run 1: champion {:ch :alt, :maj :alt} (51511.88 ns/hash) -- runner-up {:ch :alt, :maj :or}
@@ -152,7 +152,7 @@ Fixed the two flaws the earlier rounds documented, in `sha256d.evolve`:
   pairwise games into each rating. Elo spread widened from the old artificial ±16 to
   ~120 points (≈971–1090), i.e. the ratings now carry real accumulated evidence.
 
-`clojure -M:test` (16 tests, 5167 assertions, incl. new `evolve-round-mutation-test` and
+`kbb -M:test` (16 tests, 5167 assertions, incl. new `evolve-round-mutation-test` and
 `rank-persistent-ratings-test`) and the cljs proof (5/5) both pass. Three runs:
 
 ```
@@ -202,7 +202,7 @@ message-schedule strategy.
   reference across 260 input sizes + FIPS vectors (`compress-rolling-equivalence-test`)
   and under cljs.
 - Pool is now `:ch (3) x :maj (3) x :schedule (2) = 18` candidates; `rank`/`reflect`
-  route through the new injectable `sha256-bytes-with`. `clojure -M:test` (17 tests,
+  route through the new injectable `sha256-bytes-with`. `kbb -M:test` (17 tests,
   5449 assertions) and the cljs proof (6/6) pass.
 
 Three runs (leaderboards trimmed to top + the surviving `:rolling` entry):
