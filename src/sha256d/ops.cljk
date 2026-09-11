@@ -2,7 +2,7 @@
   "The 'gene pool' sha256d.evolve recombines and benchmarks: interchangeable
   reformulations of the SHA-256 round-function primitives. Every variant here is
   *exactly* equivalent to sha256d.core's reference formula for the same primitive --
-  proven algebraically below and re-checked exhaustively in test/sha256d/ops_test.cljc
+  proven algebraically below and re-checked exhaustively in test/sha256d/ops_test.cljk
   (all 2^3 single-bit patterns, plus randomized 32-bit words) -- only the operation
   sequence differs, never the result. That correctness gate is non-negotiable; only
   variants that pass it are eligible for sha256d.evolve's benchmark tournament.

@@ -2,7 +2,7 @@
  :status :merged-awaiting-hosted-reverification
  :implementation {:pull-request "https://github.com/com-junkawasaki/sha256d/pull/1"
                   :merge-commit "a7383d524c90eea2a0c04921db49757cd57a6d4e"}
- :source-of-truth {:legacy "src/sha256d/ops.cljc"
+ :source-of-truth {:legacy "src/sha256d/ops.cljk"
                    :kernel "src/sha256d/round_primitives.kotoba"}
  :domain {:inputs [:i64 :i64 :i64]
           :semantics :signed-i64-bitvector
@@ -17,7 +17,7 @@
                 :scope :parameterized-i64-bit-xor-and-bit-and-wasm-lowering}
  :excluded [:message-schedule :compression :digest :benchmark-tournament
             :platform-specific-fast-paths]
- :evidence {:cljc-oracle "test/sha256d/round_primitives_matrix_test.clj"
+ :evidence {:cljc-oracle "test/sha256d/round_primitives_matrix_test.cljk"
             :kotoba-conformance "test/sha256d/round_primitives_conformance.kotoba"
             :web-wasm-verifier "scripts/verify-kotoba-round-primitives.mjs"
             :matrix-values 7 :matrix-tuples 343 :checks-per-target 686

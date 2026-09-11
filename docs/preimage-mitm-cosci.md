@@ -2,7 +2,7 @@
 
 This is the *inverse* problem: given a digest, find a preimage faster than the 2²⁵⁶ brute-force
 bound. It is the honest realization of "design an algorithm that inverts SHA-256 below brute force,
-using the co-scientist approach." Implemented in `sha256d.mitm`, tested in `test/sha256d/mitm_test.cljc`.
+using the co-scientist approach." Implemented in `sha256d.mitm`, tested in `test/sha256d/mitm_test.cljk`.
 
 ## The one honest boundary, stated once
 
@@ -93,7 +93,7 @@ speedup: 1135×                  verified: true  (recovered pair really collides
 This is a real, running, verified below-brute-force attack primitive on the actual SHA-256 round
 function — the meet-in-the-middle square root (2^(m/2) vs 2^m) that makes the whole preimage attack
 sub-brute-force, measured in genuine operation counts. It scales as √: doubling d roughly squares the
-brute-force gap while ~doubling the MITM cost. `test/sha256d/mitm_test.cljc` pins these numbers.
+brute-force gap while ~doubling the MITM cost. `test/sha256d/mitm_test.cljk` pins these numbers.
 
 ## (A) Pushing further — the honest ceiling: bit-level buys nothing, bicliques are the real gap
 

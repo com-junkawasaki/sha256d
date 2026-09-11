@@ -88,7 +88,7 @@ run 3: champion {:ch :naive, :maj :alt}   (61386.67 ns/hash) -- clusters: [2]   
 **Not yet done (explicitly out of scope for this initial pass, left for follow-up):**
 ClojureScript/node benchmarking (only JVM was measured here -- `now-ns`'s cljs branch
 via `js/performance.now` is implemented and the *correctness* of core/ops/midstate is
-proven under cljs in `test/sha256d/cljs_verify.cljs`, but the evolve tournament itself
+proven under cljs in `test/sha256d/cljs_verify.cljk`, but the evolve tournament itself
 has only been run on the JVM so far); growing the gene pool beyond Ch/Maj.
 
 ## 2026-07-01 (round 2) — grew the gene pool to 3x3, JVM only
@@ -96,7 +96,7 @@ has only been run on the JVM so far); growing the gene pool beyond Ch/Maj.
 Added `sha256d.ops/ch-or` and `maj-or`: the same pairwise terms as `ch-naive`/
 `maj-naive` but OR'd instead of XOR'd, valid because the terms being combined are
 pairwise-disjoint (Ch) or never exactly-two-1 (Maj) -- see their doc-comments for the
-proofs, and `test/sha256d/ops_test.cljc`'s exhaustive truth-table + randomized checks.
+proofs, and `test/sha256d/ops_test.cljk`'s exhaustive truth-table + randomized checks.
 Gene pool is now 3x3 = 9 candidates. `clojure -M:test` (14 tests, 5154 assertions) and
 the cljs proof (5/5) both still pass.
 
