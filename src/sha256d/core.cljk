@@ -407,7 +407,7 @@
   words [W(t-16)..W(t-1)] on entry to step t; for t<16 they are the block words, and for
   t>=16 W(t)=σ1(W(t-2))+W(t-7)+σ0(W(t-15))+W(t-16) reads win[14]/win[9]/win[1]/win[0]
   respectively, then the window slides. Held to the same hard correctness gate as the
-  reference (see test/sha256d/core_test.cljc and sha256d.evolve/reflect) -- if it ever
+  reference (see test/sha256d/core_test.cljk and sha256d.evolve/reflect) -- if it ever
   diverged from `compress` on any input it would be disqualified, not merely slower."
   ([state block] (compress-rolling state block ch maj))
   ([[h0 h1 h2 h3 h4 h5 h6 h7] block ch-fn maj-fn]
