@@ -24,7 +24,7 @@
   ~N times as many pairwise games into each rating -- the noise-averaging that finally
   lets near-tied candidates separate.
 
-  Entry point: `(run-tournament)` for defaults, or `clojure -M -m sha256d.evolve`."
+  Entry point: `(run-tournament)` for defaults, or `kbb -M -m sha256d.evolve`."
   (:require [kotoba.lang.text :as str]
             [sha256d.core :as core]
             [sha256d.ops :as ops]))

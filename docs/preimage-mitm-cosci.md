@@ -57,7 +57,7 @@ which base words its `W_t` transitively depends on.
 
 ## Measured result (this repo's search, word granularity)
 
-`clojure -M -e "(require 'sha256d.mitm)(println (sha256d.mitm/report))"`
+`kbb -M -e "(require 'sha256d.mitm)(println (sha256d.mitm/report))"`
 
 | rounds | best cost | saved bits | neutral \|N1\|/\|N2\| | below 2²⁵⁶? |
 |---|---|---|---|---|

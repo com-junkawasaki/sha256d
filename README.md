@@ -110,10 +110,10 @@ completely different order than round-primitive rewrites -- see
 ```
 
 ```bash
-clojure -M:test               # correctness suite (JVM) -- 6000+ assertions
-clojure -M:cljs && node target/cljs-verify.js        # correctness portability proof (node)
-clojure -M:evolve             # run the tournament on the JVM, print a Meta-review report
-clojure -M:cljs-bench && node target/cljs-bench.js   # run the same tournament on V8 (node)
+kbb -M:test               # correctness suite (JVM) -- 6000+ assertions
+kbb -M:cljs && node target/cljs-verify.js        # correctness portability proof (node)
+kbb -M:evolve             # run the tournament on the JVM, print a Meta-review report
+kbb -M:cljs-bench && node target/cljs-bench.js   # run the same tournament on V8 (node)
 ```
 
 ## Portability
