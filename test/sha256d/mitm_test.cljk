@@ -1,5 +1,5 @@
 (ns sha256d.mitm-test
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [kotoba.test :refer [deftest testing is]]
             [sha256d.mitm :as mitm]))
 
 (deftest schedule-deps-test

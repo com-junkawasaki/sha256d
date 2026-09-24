@@ -3,7 +3,7 @@
   in for, on every possible input. Bitwise ops (and/or/xor/not) act independently per
   bit position, so exhaustively checking all 2^3 single-bit truth-table rows plus a
   pile of randomized full 32-bit words is a genuine correctness proof, not a sample."
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [kotoba.test :refer [deftest testing is]]
             [sha256d.core :as core]
             [sha256d.ops :as ops]))
 

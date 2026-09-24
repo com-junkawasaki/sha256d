@@ -1,5 +1,5 @@
 (ns sha256d.round-primitives-matrix-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [kotoba.test :refer [deftest is]]
             [sha256d.core :as core]
             [sha256d.ops :as ops]))
 
