@@ -18,7 +18,7 @@
   The core object is the message-schedule dependency graph: which of the 16 free base words
   W0..W15 each expanded word W_t (t>=16) transitively depends on, via
   W_t = sigma1(W_{t-2}) + W_{t-7} + sigma0(W_{t-15}) + W_{t-16}."
-  (:require [clojure.set :as set]
+  (:require [kotoba.lang.coll :as set]
             [kotoba.prng :as prng]
             [sha256d.core :as core]))
 
