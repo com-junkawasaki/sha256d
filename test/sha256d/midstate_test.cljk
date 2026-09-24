@@ -5,7 +5,7 @@
   below is additionally cross-checked: it's a synthetic (NOT the real genesis block)
   80-byte header whose sha256d was computed independently via Python's hashlib, not
   hand-derived -- see the ADR for the derivation transcript."
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [kotoba.test :refer [deftest testing is]]
             [sha256d.core :as core]
             [sha256d.midstate :as ms]))
 

@@ -1,5 +1,5 @@
 (ns sha256d.evolve-test
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [kotoba.test :refer [deftest testing is]]
             [sha256d.core :as core]
             [sha256d.ops :as ops]
             [sha256d.evolve :as evolve]))
